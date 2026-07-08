@@ -141,6 +141,8 @@ const defaultAiSettings: AiSettings = {
   cleanup_instruction: ""
 };
 
+const AI_BATCH_SIZE = 120;
+
 const navItems = [
   ["总览", Gauge],
   ["全部", FolderTree],
@@ -169,6 +171,7 @@ function App() {
   const [aiSettingsLoaded, setAiSettingsLoaded] = useState(false);
   const [analysisReport, setAnalysisReport] = useState<BookmarkAnalysisReport | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set());
   const autoImportedRef = useRef(false);
 
   useEffect(() => {
@@ -345,7 +348,7 @@ function App() {
     setNotice({ type: "ok", text: `正在请求 AI 整理 ${targets.length} 条书签...` });
     try {
       const suggestions: AiSuggestion[] = [];
-      const batches = chunkArray(targets, 40);
+      const batches = chunkArray(targets, AI_BATCH_SIZE);
       for (let index = 0; index < batches.length; index += 1) {
         setNotice({ type: "ok", text: `正在请求 AI：第 ${index + 1}/${batches.length} 批` });
         const batchSuggestions = await invoke<AiSuggestion[]>("organize_bookmarks_ai", {
@@ -475,6 +478,18 @@ function App() {
   function selectAllVisible(selected: boolean) {
     const visible = new Set(filteredBookmarks.map((item) => item.id));
     setBookmarks((current) => current.map((item) => (visible.has(item.id) ? { ...item, selected } : item)));
+  }
+
+  function toggleExpanded(path: string) {
+    setExpandedPaths((current) => {
+      const next = new Set(current);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
   }
 
   return (
@@ -744,13 +759,20 @@ function App() {
                 ) : activeNav === "待审核" ? (
                   <div className="divide-y divide-border">
                     {reviewGroups.map(([category, items]) => (
-                      <ReviewGroup category={category} items={items} key={category} onToggle={toggleSelected} />
+                      <ReviewGroup
+                        category={category}
+                        expanded={expandedPaths.has(`review:${category}`)}
+                        items={items}
+                        key={category}
+                        onToggle={toggleSelected}
+                        onToggleExpanded={toggleExpanded}
+                      />
                     ))}
                   </div>
                 ) : activeNav === "AI 分类" ? (
-                  <TreeView node={categoryTree} onToggle={toggleSelected} />
+                  <TreeView expandedPaths={expandedPaths} node={categoryTree} onToggle={toggleSelected} onToggleExpanded={toggleExpanded} />
                 ) : (
-                  <TreeView node={originalTree} onToggle={toggleSelected} />
+                  <TreeView expandedPaths={expandedPaths} node={originalTree} onToggle={toggleSelected} onToggleExpanded={toggleExpanded} />
                 )}
               </div>
             </div>
@@ -763,33 +785,43 @@ function App() {
 
 function ReviewGroup({
   category,
+  expanded,
   items,
-  onToggle
+  onToggle,
+  onToggleExpanded
 }: {
   category: string;
+  expanded: boolean;
   items: ViewBookmark[];
   onToggle: (id: string) => void;
+  onToggleExpanded: (path: string) => void;
 }) {
   const Icon = categoryIcon(category);
+  const path = `review:${category}`;
 
   return (
     <section>
-      <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-panel2 px-4 py-2">
+      <button
+        className="sticky top-0 z-10 flex w-full items-center justify-between border-b border-border bg-panel2 px-4 py-2 text-left hover:bg-bg"
+        onClick={() => onToggleExpanded(path)}
+      >
         <div className="flex items-center gap-2 text-sm font-medium">
+          <ChevronRight className={clsx("text-muted transition-transform", expanded && "rotate-90")} size={14} />
           <span className="grid h-7 w-7 place-items-center rounded-md bg-bg text-blue-200">
             <Icon size={15} />
           </span>
           {category}
         </div>
         <span className="rounded bg-bg px-2 py-0.5 text-xs text-muted">{items.length} 条</span>
-      </div>
-      {items.map((bookmark) => (
-        <BookmarkRow
-          bookmark={bookmark}
-          key={`${bookmark.source_browser}-${bookmark.id}-${bookmark.url}`}
-          onToggle={onToggle}
-        />
-      ))}
+      </button>
+      {expanded &&
+        items.map((bookmark) => (
+          <BookmarkRow
+            bookmark={bookmark}
+            key={`${bookmark.source_browser}-${bookmark.id}-${bookmark.url}`}
+            onToggle={onToggle}
+          />
+        ))}
     </section>
   );
 }
@@ -851,7 +883,19 @@ function AnalysisReportView({ report }: { report: BookmarkAnalysisReport }) {
   );
 }
 
-function TreeView({ node, onToggle, depth = 0 }: { node: BookmarkTreeNode; onToggle: (id: string) => void; depth?: number }) {
+function TreeView({
+  node,
+  expandedPaths,
+  onToggle,
+  onToggleExpanded,
+  depth = 0
+}: {
+  node: BookmarkTreeNode;
+  expandedPaths: Set<string>;
+  onToggle: (id: string) => void;
+  onToggleExpanded: (path: string) => void;
+  depth?: number;
+}) {
   const children = Array.from(node.children.values()).sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
   const bookmarks = [...node.bookmarks].sort((a, b) => a.title.localeCompare(b.title, "zh-CN"));
 
@@ -859,20 +903,31 @@ function TreeView({ node, onToggle, depth = 0 }: { node: BookmarkTreeNode; onTog
     <div>
       {children.map((child) => {
         const Icon = categoryIcon(child.name);
+        const path = `tree:${child.path}`;
+        const expanded = expandedPaths.has(path);
         return (
           <section key={child.path}>
-            <div
-              className="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-panel2 px-4 py-2 text-sm font-medium"
+            <button
+              className="sticky top-0 z-10 flex w-full items-center gap-2 border-b border-border bg-panel2 px-4 py-2 text-left text-sm font-medium hover:bg-bg"
+              onClick={() => onToggleExpanded(path)}
               style={{ paddingLeft: `${16 + depth * 18}px` }}
             >
-              <ChevronRight className="text-muted" size={14} />
+              <ChevronRight className={clsx("text-muted transition-transform", expanded && "rotate-90")} size={14} />
               <span className="grid h-7 w-7 place-items-center rounded-md bg-bg text-blue-200">
                 <Icon size={15} />
               </span>
               <span className="min-w-0 flex-1 truncate">{child.name}</span>
               <span className="rounded bg-bg px-2 py-0.5 text-xs text-muted">{countTreeBookmarks(child)} 条</span>
-            </div>
-            <TreeView node={child} onToggle={onToggle} depth={depth + 1} />
+            </button>
+            {expanded && (
+              <TreeView
+                depth={depth + 1}
+                expandedPaths={expandedPaths}
+                node={child}
+                onToggle={onToggle}
+                onToggleExpanded={onToggleExpanded}
+              />
+            )}
           </section>
         );
       })}
@@ -1082,12 +1137,19 @@ function countTreeBookmarks(node: BookmarkTreeNode): number {
 }
 
 function preferredProfile(profiles: BrowserProfile[]) {
-  return profiles.find(isDefaultProfile) ?? profiles[0];
+  return (
+    profiles.find((profile) => profile.browser === "firefox" && profile.name.toLowerCase().includes("default-release")) ??
+    profiles.find(isDefaultProfile) ??
+    profiles[0]
+  );
 }
 
 function isDefaultProfile(profile: BrowserProfile) {
   const name = profile.name.toLowerCase();
-  return name === "default" || name.includes("default-release") || name.includes(".default");
+  if (profile.browser === "chrome") {
+    return name === "default";
+  }
+  return name.includes("default-release") || name === "default" || name.endsWith(".default");
 }
 
 function shouldExcludeByInstruction(bookmark: BookmarkRecord, instruction: string) {

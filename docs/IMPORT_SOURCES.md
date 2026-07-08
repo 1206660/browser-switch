@@ -111,6 +111,8 @@ places.sqlite
 ### Firefox Import Notes
 
 - Always copy `places.sqlite` before reading.
+- Ignore profiles whose `places.sqlite` is missing or empty; Firefox can leave stale/empty profile folders behind.
+- Prefer the profile pointed to by Firefox `profiles.ini` before falling back to name-based sorting.
 - If copy fails, ask the user to close Firefox and retry.
 - Do not write into `places.sqlite` in V0.1.
 

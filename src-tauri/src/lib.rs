@@ -155,15 +155,14 @@ fn detect_chrome_profiles() -> Result<Vec<BrowserProfile>, String> {
 #[tauri::command]
 fn detect_firefox_profiles() -> Result<Vec<BrowserProfile>, String> {
     let app_data = env::var("APPDATA").map_err(|_| "无法读取 APPDATA".to_string())?;
-    let root = PathBuf::from(app_data)
-        .join("Mozilla")
-        .join("Firefox")
-        .join("Profiles");
+    let firefox_root = PathBuf::from(app_data).join("Mozilla").join("Firefox");
+    let root = firefox_root.join("Profiles");
 
     if !root.exists() {
         return Ok(Vec::new());
     }
 
+    let default_profile_path = firefox_default_profile_path(&firefox_root);
     let mut profiles = Vec::new();
     for entry in fs::read_dir(&root).map_err(|err| err.to_string())? {
         let entry = entry.map_err(|err| err.to_string())?;
@@ -174,6 +173,11 @@ fn detect_firefox_profiles() -> Result<Vec<BrowserProfile>, String> {
 
         let bookmark_path = path.join("places.sqlite");
         if bookmark_path.exists() {
+            let metadata = fs::metadata(&bookmark_path).map_err(|err| err.to_string())?;
+            if metadata.len() == 0 {
+                continue;
+            }
+
             let name = path
                 .file_name()
                 .and_then(|value| value.to_str())
@@ -190,8 +194,53 @@ fn detect_firefox_profiles() -> Result<Vec<BrowserProfile>, String> {
         }
     }
 
-    profiles.sort_by(|a, b| a.name.cmp(&b.name));
+    profiles.sort_by(|a, b| {
+        firefox_profile_rank(a, default_profile_path.as_deref())
+            .cmp(&firefox_profile_rank(b, default_profile_path.as_deref()))
+            .then_with(|| a.name.cmp(&b.name))
+    });
     Ok(profiles)
+}
+
+fn firefox_default_profile_path(firefox_root: &Path) -> Option<PathBuf> {
+    let ini_path = firefox_root.join("profiles.ini");
+    let raw = fs::read_to_string(ini_path).ok()?;
+
+    for line in raw.lines() {
+        let line = line.trim();
+        let Some(value) = line.strip_prefix("Default=") else {
+            continue;
+        };
+        if value == "1" || value.is_empty() {
+            continue;
+        }
+
+        let normalized = value.replace('/', std::path::MAIN_SEPARATOR_STR);
+        let path = PathBuf::from(normalized);
+        return Some(if path.is_absolute() {
+            path
+        } else {
+            firefox_root.join(path)
+        });
+    }
+
+    None
+}
+
+fn firefox_profile_rank(profile: &BrowserProfile, default_profile_path: Option<&Path>) -> usize {
+    let path = PathBuf::from(&profile.path);
+    if default_profile_path.is_some_and(|default_path| default_path == path) {
+        return 0;
+    }
+
+    let name = profile.name.to_lowercase();
+    if name.contains("default-release") {
+        1
+    } else if name == "default" || name.ends_with(".default") {
+        2
+    } else {
+        3
+    }
 }
 
 #[tauri::command]
@@ -1000,7 +1049,9 @@ fn build_analysis_input(bookmarks: &[BookmarkRecord], instruction: &str) -> Valu
             })
             .or_default() += 1;
         *domain_counts.entry(domain_of(&bookmark.url)).or_default() += 1;
-        *category_counts.entry(bookmark.category.clone()).or_default() += 1;
+        *category_counts
+            .entry(bookmark.category.clone())
+            .or_default() += 1;
     }
 
     let samples = bookmarks
