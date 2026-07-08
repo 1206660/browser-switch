@@ -136,12 +136,13 @@ type BookmarkAnalysisReport = {
 
 const defaultAiSettings: AiSettings = {
   base_url: "https://api.deepseek.com",
-  model: "deepseek-chat",
+  model: "deepseek-v4-flash",
   api_key: "",
   cleanup_instruction: ""
 };
 
 const AI_BATCH_SIZE = 120;
+const AI_MIN_RETRY_BATCH_SIZE = 20;
 
 const navItems = [
   ["总览", Gauge],
@@ -351,10 +352,7 @@ function App() {
       const batches = chunkArray(targets, AI_BATCH_SIZE);
       for (let index = 0; index < batches.length; index += 1) {
         setNotice({ type: "ok", text: `正在请求 AI：第 ${index + 1}/${batches.length} 批` });
-        const batchSuggestions = await invoke<AiSuggestion[]>("organize_bookmarks_ai", {
-          settings: aiSettings,
-          bookmarks: batches[index]
-        });
+        const batchSuggestions = await requestAiCleanupBatch(batches[index], `第 ${index + 1}/${batches.length} 批`);
         suggestions.push(...batchSuggestions);
       }
       const suggestionMap = new Map(suggestions.map((item) => [item.id, item]));
@@ -395,6 +393,32 @@ function App() {
       setNotice({ type: "error", text: String(error) });
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function requestAiCleanupBatch(batch: ViewBookmark[], label: string): Promise<AiSuggestion[]> {
+    try {
+      return await invoke<AiSuggestion[]>("organize_bookmarks_ai", {
+        settings: aiSettings,
+        bookmarks: batch
+      });
+    } catch (error) {
+      const message = String(error);
+      if (batch.length <= AI_MIN_RETRY_BATCH_SIZE || !isRecoverableAiJsonError(message)) {
+        throw error;
+      }
+
+      const midpoint = Math.ceil(batch.length / 2);
+      const first = batch.slice(0, midpoint);
+      const second = batch.slice(midpoint);
+      setNotice({
+        type: "warn",
+        text: `${label} 返回过长，自动拆成 ${first.length}+${second.length} 条重试`
+      });
+
+      const firstSuggestions = await requestAiCleanupBatch(first, `${label}-1`);
+      const secondSuggestions = await requestAiCleanupBatch(second, `${label}-2`);
+      return [...firstSuggestions, ...secondSuggestions];
     }
   }
 
@@ -637,7 +661,7 @@ function App() {
                 <input
                   className="input mb-2"
                   onChange={(event) => setAiSettings((current) => ({ ...current, model: event.target.value }))}
-                  placeholder="deepseek-chat"
+                  placeholder="deepseek-v4-flash"
                   value={aiSettings.model}
                 />
                 <label className="mb-1 block text-xs text-muted">API Key</label>
@@ -1191,6 +1215,10 @@ function chunkArray<T>(items: T[], size: number) {
     chunks.push(items.slice(index, index + size));
   }
   return chunks;
+}
+
+function isRecoverableAiJsonError(message: string) {
+  return /AI JSON|不是完整 JSON|缺少 items|EOF|expected|trailing characters|control character/i.test(message);
 }
 
 function loadAiSettings(): AiSettings {

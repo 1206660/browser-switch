@@ -15,6 +15,8 @@ use std::{
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
+const AI_MAX_OUTPUT_TOKENS: u32 = 8192;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct BrowserProfile {
     browser: String,
@@ -538,6 +540,7 @@ async fn organize_bookmarks_ai(
     let body = json!({
         "model": settings.model,
         "temperature": 0.2,
+        "max_tokens": AI_MAX_OUTPUT_TOKENS,
         "response_format": { "type": "json_object" },
         "messages": [
             {
@@ -662,6 +665,7 @@ async fn analyze_bookmarks_ai(
     let body = json!({
         "model": settings.model,
         "temperature": 0.15,
+        "max_tokens": AI_MAX_OUTPUT_TOKENS,
         "response_format": { "type": "json_object" },
         "messages": [
             {
