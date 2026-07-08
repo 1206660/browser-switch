@@ -4,6 +4,7 @@ import {
   ArchiveRestore,
   Bot,
   Briefcase,
+  ClipboardList,
   ChevronRight,
   CheckCircle2,
   Chrome,
@@ -111,6 +112,28 @@ type AiSuggestion = {
   exclude: boolean;
 };
 
+type AnalysisFolderAdvice = {
+  path: string;
+  decision: string;
+  reason: string;
+  priority: string;
+};
+
+type AnalysisCandidate = {
+  title: string;
+  url: string;
+  folder_path: string;
+  action: string;
+  reason: string;
+};
+
+type BookmarkAnalysisReport = {
+  summary: string;
+  folders: AnalysisFolderAdvice[];
+  candidates: AnalysisCandidate[];
+  actions: string[];
+};
+
 const defaultAiSettings: AiSettings = {
   base_url: "https://api.deepseek.com",
   model: "deepseek-chat",
@@ -144,6 +167,8 @@ function App() {
   const [lastWrite, setLastWrite] = useState<ChromeWriteResult | null>(null);
   const [aiSettings, setAiSettings] = useState<AiSettings>(() => loadAiSettings());
   const [aiSettingsLoaded, setAiSettingsLoaded] = useState(false);
+  const [analysisReport, setAnalysisReport] = useState<BookmarkAnalysisReport | null>(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
   const autoImportedRef = useRef(false);
 
   useEffect(() => {
@@ -367,6 +392,32 @@ function App() {
       setNotice({ type: "error", text: String(error) });
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function runAiAnalysis() {
+    if (bookmarks.length === 0) {
+      setNotice({ type: "warn", text: "请先导入书签" });
+      return;
+    }
+    if (!aiSettings.api_key.trim()) {
+      setNotice({ type: "warn", text: "请先填写 API Key，才能进行 AI 诊断" });
+      return;
+    }
+
+    setAnalysisLoading(true);
+    setNotice({ type: "ok", text: "正在分析收藏夹价值..." });
+    try {
+      const report = await invoke<BookmarkAnalysisReport>("analyze_bookmarks_ai", {
+        settings: aiSettings,
+        bookmarks
+      });
+      setAnalysisReport(report);
+      setNotice({ type: "ok", text: "AI 诊断完成" });
+    } catch (error) {
+      setNotice({ type: "error", text: String(error) });
+    } finally {
+      setAnalysisLoading(false);
     }
   }
 
@@ -603,6 +654,20 @@ function App() {
                 </div>
               </Panel>
 
+              <Panel title="AI 诊断" icon={<ClipboardList size={16} />}>
+                <button
+                  className="btn-primary w-full"
+                  disabled={bookmarks.length === 0 || analysisLoading}
+                  onClick={() => void runAiAnalysis()}
+                >
+                  {analysisLoading ? <Loader2 className="animate-spin" size={16} /> : <ClipboardList size={16} />}
+                  分析哪些没用了
+                </button>
+                <div className="mt-2 text-xs leading-5 text-muted">
+                  会按当前 AI 年代判断低价值、过时、可删除或应归档的目录和链接。
+                </div>
+              </Panel>
+
               <Panel title="写入 Chrome" icon={<UploadCloud size={16} />}>
                 <label className="mb-2 block text-xs text-muted">目标配置</label>
                 <select
@@ -667,7 +732,9 @@ function App() {
               </div>
 
               <div className="min-h-0 flex-1 overflow-auto">
-                {filteredBookmarks.length === 0 ? (
+                {activeNav === "总览" && analysisReport ? (
+                  <AnalysisReportView report={analysisReport} />
+                ) : filteredBookmarks.length === 0 ? (
                   <div className="grid h-full place-items-center text-sm text-muted">
                     <div className="text-center">
                       <FileJson className="mx-auto mb-3" size={32} />
@@ -724,6 +791,63 @@ function ReviewGroup({
         />
       ))}
     </section>
+  );
+}
+
+function AnalysisReportView({ report }: { report: BookmarkAnalysisReport }) {
+  return (
+    <div className="space-y-4 p-4">
+      <section className="rounded-lg border border-border bg-bg p-4">
+        <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
+          <ClipboardList size={16} />
+          AI 诊断摘要
+        </div>
+        <p className="text-sm leading-6 text-muted">{report.summary}</p>
+      </section>
+
+      <section className="rounded-lg border border-border bg-bg">
+        <div className="border-b border-border px-4 py-3 text-sm font-semibold">目录建议</div>
+        <div className="divide-y divide-border">
+          {report.folders.slice(0, 20).map((item) => (
+            <div className="grid grid-cols-[96px_72px_1fr] gap-3 px-4 py-3 text-sm" key={`${item.path}-${item.reason}`}>
+              <Badge tone={item.decision === "清理" ? "warn" : item.decision === "保留" ? "ok" : "neutral"}>{item.decision}</Badge>
+              <span className="text-xs text-muted">{item.priority}</span>
+              <div className="min-w-0">
+                <div className="truncate font-medium">{item.path}</div>
+                <div className="mt-1 text-xs leading-5 text-muted">{item.reason}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-border bg-bg">
+        <div className="border-b border-border px-4 py-3 text-sm font-semibold">具体候选</div>
+        <div className="divide-y divide-border">
+          {report.candidates.slice(0, 30).map((item) => (
+            <div className="px-4 py-3 text-sm" key={`${item.url}-${item.action}`}>
+              <div className="flex items-center gap-2">
+                <Badge tone={item.action === "删除" ? "warn" : item.action === "保留" ? "ok" : "neutral"}>{item.action}</Badge>
+                <span className="truncate font-medium">{item.title}</span>
+              </div>
+              <div className="mt-1 truncate text-xs text-muted">{item.url}</div>
+              <div className="mt-1 text-xs leading-5 text-muted">
+                {item.folder_path} / {item.reason}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-border bg-bg p-4">
+        <div className="mb-2 text-sm font-semibold">下一步动作</div>
+        <ul className="space-y-2 text-sm text-muted">
+          {report.actions.map((action) => (
+            <li key={action}>- {action}</li>
+          ))}
+        </ul>
+      </section>
+    </div>
   );
 }
 

@@ -78,6 +78,31 @@ struct AiSuggestion {
     exclude: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AnalysisFolderAdvice {
+    path: String,
+    decision: String,
+    reason: String,
+    priority: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AnalysisCandidate {
+    title: String,
+    url: String,
+    folder_path: String,
+    action: String,
+    reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BookmarkAnalysisReport {
+    summary: String,
+    folders: Vec<AnalysisFolderAdvice>,
+    candidates: Vec<AnalysisCandidate>,
+    actions: Vec<String>,
+}
+
 #[derive(Default)]
 struct ChromeFolderNode {
     children: BTreeMap<String, ChromeFolderNode>,
@@ -577,6 +602,69 @@ async fn organize_bookmarks_ai(
     Ok(suggestions)
 }
 
+#[tauri::command]
+async fn analyze_bookmarks_ai(
+    settings: AiSettings,
+    bookmarks: Vec<BookmarkRecord>,
+) -> Result<BookmarkAnalysisReport, String> {
+    if settings.api_key.trim().is_empty() {
+        return Err("请先填写 API Key".to_string());
+    }
+    if bookmarks.is_empty() {
+        return Err("没有可分析的书签".to_string());
+    }
+
+    let endpoint = chat_completions_endpoint(&settings.base_url);
+    let input = build_analysis_input(&bookmarks, &settings.cleanup_instruction);
+    let body = json!({
+        "model": settings.model,
+        "temperature": 0.15,
+        "response_format": { "type": "json_object" },
+        "messages": [
+            {
+                "role": "system",
+                "content": "你是一个中文收藏夹诊断顾问。你要站在 2026 年 AI 工具普及后的使用场景下，判断哪些收藏夹/链接已经低价值、重复、过时、可删除或应归档。不要泛泛而谈，要给出目录级建议和具体候选项。输出必须是 JSON：{\"summary\":\"...\",\"folders\":[{\"path\":\"...\",\"decision\":\"清理|归档|保留|重组\",\"reason\":\"...\",\"priority\":\"高|中|低\"}],\"candidates\":[{\"title\":\"...\",\"url\":\"...\",\"folder_path\":\"...\",\"action\":\"删除|归档|保留|待确认\",\"reason\":\"...\"}],\"actions\":[\"...\"]}。"
+            },
+            {
+                "role": "user",
+                "content": input.to_string()
+            }
+        ]
+    });
+
+    let client = Client::new();
+    let response = client
+        .post(endpoint)
+        .bearer_auth(settings.api_key.trim())
+        .json(&body)
+        .send()
+        .await
+        .map_err(|err| format!("AI 诊断请求失败: {err}"))?;
+
+    let status = response.status();
+    let response_json: Value = response
+        .json()
+        .await
+        .map_err(|err| format!("AI 诊断响应解析失败: {err}"))?;
+
+    if !status.is_success() {
+        return Err(format!("AI 诊断失败: HTTP {status}, {response_json}"));
+    }
+
+    let content = response_json
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("AI 诊断响应缺少 message.content: {response_json}"))?;
+
+    let parsed = parse_ai_content(content)?;
+    serde_json::from_value::<BookmarkAnalysisReport>(parsed)
+        .map_err(|err| format!("AI 诊断 JSON 解析失败: {err}"))
+}
+
 fn collect_chrome_node(
     node: &Value,
     folder: Vec<String>,
@@ -898,6 +986,101 @@ fn default_tags(url: &str, category: &str) -> Vec<String> {
     }
 }
 
+fn build_analysis_input(bookmarks: &[BookmarkRecord], instruction: &str) -> Value {
+    let mut folder_counts: HashMap<String, usize> = HashMap::new();
+    let mut domain_counts: HashMap<String, usize> = HashMap::new();
+    let mut category_counts: HashMap<String, usize> = HashMap::new();
+
+    for bookmark in bookmarks {
+        *folder_counts
+            .entry(if bookmark.folder_path.trim().is_empty() {
+                "未分类".to_string()
+            } else {
+                bookmark.folder_path.clone()
+            })
+            .or_default() += 1;
+        *domain_counts.entry(domain_of(&bookmark.url)).or_default() += 1;
+        *category_counts.entry(bookmark.category.clone()).or_default() += 1;
+    }
+
+    let samples = bookmarks
+        .iter()
+        .filter(|bookmark| likely_cleanup_candidate(bookmark))
+        .take(220)
+        .map(|bookmark| {
+            json!({
+                "title": bookmark.title,
+                "url": bookmark.url,
+                "domain": domain_of(&bookmark.url),
+                "folder_path": bookmark.folder_path,
+                "category": bookmark.category,
+                "status": bookmark.status
+            })
+        })
+        .collect::<Vec<_>>();
+
+    json!({
+        "user_instruction": instruction,
+        "analysis_goal": "判断当前 AI 年代哪些收藏夹/链接低价值、过时、重复、可删除或应归档。尤其关注购物电商、旧游戏、过时工具、重复资讯、旧教程、已被 AI/新工具替代的资料。",
+        "total_bookmarks": bookmarks.len(),
+        "top_folders": top_counts(folder_counts, 80),
+        "top_domains": top_counts(domain_counts, 80),
+        "top_categories": top_counts(category_counts, 60),
+        "candidate_samples": samples,
+        "decision_policy": {
+            "清理": "明显不再需要、用户明确不要、低价值入口页、旧游戏/购物/活动页",
+            "归档": "可能有历史价值但低频使用，不应占书签栏主位置",
+            "保留": "仍有工具/项目/账号/参考价值",
+            "重组": "目录混杂，需要拆分到公司/家庭/个人/休闲等层级"
+        }
+    })
+}
+
+fn top_counts(counts: HashMap<String, usize>, limit: usize) -> Vec<Value> {
+    let mut values = counts.into_iter().collect::<Vec<_>>();
+    values.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    values
+        .into_iter()
+        .take(limit)
+        .map(|(name, count)| json!({ "name": name, "count": count }))
+        .collect()
+}
+
+fn likely_cleanup_candidate(bookmark: &BookmarkRecord) -> bool {
+    let text = format!(
+        "{} {} {} {}",
+        bookmark.title, bookmark.url, bookmark.folder_path, bookmark.category
+    )
+    .to_lowercase();
+
+    [
+        "taobao",
+        "tmall",
+        "jd.com",
+        "amazon",
+        "shop",
+        "coupon",
+        "steam",
+        "epicgames",
+        "warcraft",
+        "wow",
+        "魔兽",
+        "购物",
+        "电商",
+        "游戏",
+        "团购",
+        "促销",
+        "活动",
+        "下载",
+        "破解",
+        "旧版",
+        "deprecated",
+        "404",
+    ]
+    .iter()
+    .any(|keyword| text.contains(keyword))
+}
+
 fn chat_completions_endpoint(base_url: &str) -> String {
     let trimmed = base_url.trim().trim_end_matches('/');
     if trimmed.ends_with("/chat/completions") {
@@ -1076,7 +1259,8 @@ pub fn run() {
             save_ai_settings,
             write_chrome_bookmarks,
             restore_chrome_backup,
-            organize_bookmarks_ai
+            organize_bookmarks_ai,
+            analyze_bookmarks_ai
         ])
         .run(tauri::generate_context!())
         .expect("error while running browser-switch");
