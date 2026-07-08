@@ -262,16 +262,10 @@ fn import_chrome_bookmarks(
     let mut bookmarks = Vec::new();
     let mut folders = 0usize;
     if let Some(roots) = value.get("roots").and_then(Value::as_object) {
-        for (root_key, node) in roots {
-            let root_name = match root_key.as_str() {
-                "bookmark_bar" => "书签栏",
-                "other" => "其他书签",
-                "synced" => "移动设备书签",
-                _ => root_key.as_str(),
-            };
+        for node in roots.values() {
             collect_chrome_node(
                 node,
-                vec![root_name.to_string()],
+                Vec::new(),
                 &profile_name,
                 &mut bookmarks,
                 &mut folders,
@@ -758,7 +752,11 @@ fn collect_chrome_node(
                 return;
             }
 
-            let folder_path = folder.join("/");
+            let folder_path = if folder.is_empty() {
+                "Chrome".to_string()
+            } else {
+                folder.join("/")
+            };
             let category = rule_category(&title, &url, &folder_path);
             let tags = default_tags(&url, &category);
             let id = node
@@ -816,7 +814,7 @@ fn firefox_folder_path(parent_id: i64, folders: &HashMap<i64, (i64, String)>) ->
     let mut guard = 0;
 
     while let Some((parent, title)) = folders.get(&current) {
-        if !title.is_empty() {
+        if !title.is_empty() && !is_firefox_system_root(current) {
             names.push(title.clone());
         }
         if *parent == current || *parent == 0 {
@@ -835,6 +833,10 @@ fn firefox_folder_path(parent_id: i64, folders: &HashMap<i64, (i64, String)>) ->
     } else {
         names.join("/")
     }
+}
+
+fn is_firefox_system_root(folder_id: i64) -> bool {
+    matches!(folder_id, 1..=6)
 }
 
 fn build_chrome_category_folders(bookmarks: &[BookmarkRecord], next_id: &mut u64) -> Vec<Value> {
@@ -1295,6 +1297,55 @@ fn stable_id(value: &str) -> String {
 
 fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn firefox_folder_path_skips_system_roots() {
+        let folders = HashMap::from([
+            (1, (0, String::new())),
+            (2, (1, "menu".to_string())),
+            (3, (1, "toolbar".to_string())),
+            (30, (3, "乐动内网".to_string())),
+            (210, (30, "Golang".to_string())),
+            (900, (2, "常用工具".to_string())),
+        ]);
+
+        assert_eq!(firefox_folder_path(30, &folders), "乐动内网");
+        assert_eq!(firefox_folder_path(210, &folders), "乐动内网/Golang");
+        assert_eq!(firefox_folder_path(900, &folders), "常用工具");
+    }
+
+    #[test]
+    fn chrome_folder_path_skips_system_roots() {
+        let tree = serde_json::json!({
+            "type": "folder",
+            "name": "书签栏",
+            "children": [
+                {
+                    "type": "folder",
+                    "name": "乐动内网",
+                    "children": [
+                        {
+                            "type": "url",
+                            "name": "内网工具",
+                            "url": "http://192.168.2.244/"
+                        }
+                    ]
+                }
+            ]
+        });
+        let mut bookmarks = Vec::new();
+        let mut folders = 0;
+
+        collect_chrome_node(&tree, Vec::new(), "Default", &mut bookmarks, &mut folders);
+
+        assert_eq!(bookmarks.len(), 1);
+        assert_eq!(bookmarks[0].folder_path, "乐动内网");
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

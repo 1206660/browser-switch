@@ -79,6 +79,7 @@ Chrome timestamp note:
 - Visit count is not in the `Bookmarks` JSON file.
 - Favicon data is separate.
 - Chrome may rewrite the file while running, so browser-switch should copy before reading.
+- Display paths omit Chrome system roots such as `书签栏`, `其他书签`, and `移动设备书签` so real folders are visible at the top level.
 
 ## 4. Firefox Import
 
@@ -113,6 +114,7 @@ places.sqlite
 - Always copy `places.sqlite` before reading.
 - Ignore profiles whose `places.sqlite` is missing or empty; Firefox can leave stale/empty profile folders behind.
 - Prefer the profile pointed to by Firefox `profiles.ini` before falling back to name-based sorting.
+- Remove Firefox system roots such as `toolbar`, `menu`, `tags`, `unfiled`, and `mobile` from displayed folder paths so the user's real folders appear at the top level.
 - If copy fails, ask the user to close Firefox and retry.
 - Do not write into `places.sqlite` in V0.1.
 
