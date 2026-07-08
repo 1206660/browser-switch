@@ -62,6 +62,8 @@ struct AiSettings {
     base_url: String,
     model: String,
     api_key: String,
+    #[serde(default)]
+    cleanup_instruction: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,6 +75,7 @@ struct AiSuggestion {
     tags: Vec<String>,
     confidence: f64,
     reason: String,
+    exclude: bool,
 }
 
 #[tauri::command]
@@ -289,6 +292,28 @@ fn check_chrome_running() -> bool {
 }
 
 #[tauri::command]
+fn load_ai_settings(app: AppHandle) -> Result<Option<AiSettings>, String> {
+    let path = ai_settings_path(&app)?;
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let raw = fs::read_to_string(path).map_err(|err| format!("读取 AI 设置失败: {err}"))?;
+    let settings = serde_json::from_str::<AiSettings>(&raw).map_err(|err| format!("AI 设置解析失败: {err}"))?;
+    Ok(Some(settings))
+}
+
+#[tauri::command]
+fn save_ai_settings(app: AppHandle, settings: AiSettings) -> Result<(), String> {
+    let path = ai_settings_path(&app)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+    }
+    let raw = serde_json::to_string_pretty(&settings).map_err(|err| err.to_string())?;
+    fs::write(path, raw).map_err(|err| format!("保存 AI 设置失败: {err}"))
+}
+
+#[tauri::command]
 fn write_chrome_bookmarks(
     app: AppHandle,
     profile_path: String,
@@ -312,7 +337,6 @@ fn write_chrome_bookmarks(
     let mut value: Value =
         serde_json::from_str(&raw).map_err(|err| format!("Chrome 书签 JSON 解析失败: {err}"))?;
     let mut next_id = max_chrome_id(&value) + 1;
-    let category_names = generated_category_names(&bookmarks);
     let category_folders = build_chrome_category_folders(&bookmarks, &mut next_id);
     let folder_count = category_folders.len();
 
@@ -329,10 +353,9 @@ fn write_chrome_bookmarks(
         .and_then(Value::as_array_mut)
         .ok_or_else(|| "Chrome 书签栏缺少 children".to_string())?;
 
-    children.retain(|child| {
-        let name = child.get("name").and_then(Value::as_str).unwrap_or("");
-        name != "browser-switch" && !category_names.iter().any(|category| category == name)
-    });
+    // The write target is the Chrome bookmark bar. The user expects the reviewed
+    // result to replace the pre-cleanup bookmark bar, not sit beside it.
+    children.clear();
     children.extend(category_folders);
 
     let serialized = serde_json::to_string_pretty(&value).map_err(|err| err.to_string())?;
@@ -427,8 +450,10 @@ async fn organize_bookmarks_ai(
             "title": "中文标题尽量不超过15字，英文标题尽量不超过30字符，去掉站点噪音后缀",
             "summary": "中文摘要不超过30字，用来说明这个页面是做什么的",
             "tags": "返回2到5个具体标签，不要返回网站、工具、资源这类泛词",
+            "exclude": "如果用户要求清理掉、删除、不再保留某类书签，将对应项 exclude 设为 true",
             "output": "只返回JSON，不要Markdown，不要解释"
         },
+        "user_instruction": settings.cleanup_instruction,
         "items": input_items
     });
 
@@ -439,7 +464,7 @@ async fn organize_bookmarks_ai(
         "messages": [
             {
                 "role": "system",
-                "content": "你是一个中文书签整理助手。你只生成整理建议，不删除、不移动真实书签。输出必须是 JSON，格式为 {\"items\":[{\"id\":\"...\",\"category\":\"...\",\"title\":\"...\",\"summary\":\"...\",\"tags\":[\"...\"],\"confidence\":0.8,\"reason\":\"...\"}]}。"
+                "content": "你是一个中文书签整理助手。你只生成整理建议，不删除、不移动真实书签。输出必须是 JSON，格式为 {\"items\":[{\"id\":\"...\",\"category\":\"...\",\"title\":\"...\",\"summary\":\"...\",\"tags\":[\"...\"],\"confidence\":0.8,\"reason\":\"...\",\"exclude\":false}]}。如果用户要求清理掉某个主题，对匹配书签返回 exclude:true。"
             },
             {
                 "role": "user",
@@ -532,6 +557,10 @@ async fn organize_bookmarks_ai(
                 .unwrap_or("")
                 .trim()
                 .to_string(),
+            exclude: item
+                .get("exclude")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
         });
     }
 
@@ -703,43 +732,6 @@ fn build_chrome_category_folders(bookmarks: &[BookmarkRecord], next_id: &mut u64
     }
 
     category_folders
-}
-
-fn generated_category_names(bookmarks: &[BookmarkRecord]) -> Vec<String> {
-    let mut names = bookmarks
-        .iter()
-        .map(|bookmark| {
-            if bookmark.category.trim().is_empty() {
-                "其他".to_string()
-            } else {
-                bookmark.category.trim().to_string()
-            }
-        })
-        .collect::<Vec<_>>();
-
-    names.extend(
-        [
-            "开发技术",
-            "AI 工具",
-            "设计素材",
-            "效率工具",
-            "学习资料",
-            "新闻资讯",
-            "投资理财",
-            "购物电商",
-            "社交社区",
-            "影音娱乐",
-            "游戏",
-            "生活日常",
-            "工作办公",
-            "其他",
-        ]
-        .iter()
-        .map(|value| value.to_string()),
-    );
-    names.sort();
-    names.dedup();
-    names
 }
 
 fn remove_legacy_browser_switch_folders(roots: &mut serde_json::Map<String, Value>) {
@@ -944,6 +936,10 @@ fn backup_chrome_writeback(app: &AppHandle, source: &Path) -> Result<PathBuf, St
     Ok(target)
 }
 
+fn ai_settings_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app_data_dir(app)?.join("config").join("ai-settings.json"))
+}
+
 fn copy_if_exists(source: &Path, target: &Path) -> Result<(), String> {
     if source.exists() {
         fs::copy(source, target).map_err(|err| err.to_string())?;
@@ -1041,6 +1037,8 @@ pub fn run() {
             import_chrome_bookmarks,
             import_firefox_bookmarks,
             check_chrome_running,
+            load_ai_settings,
+            save_ai_settings,
             write_chrome_bookmarks,
             restore_chrome_backup,
             organize_bookmarks_ai

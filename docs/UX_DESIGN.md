@@ -492,7 +492,7 @@ Secondary actions:
 
 Required warning:
 
-- `写入前会自动备份 Chrome 收藏夹。Chrome 正在运行时会自动关闭，写完后重新打开。`
+- `写入前会自动备份 Chrome 收藏夹，并清空当前书签栏后写入整理结果。Chrome 正在运行时会自动关闭，写完后重新打开。`
 
 If Chrome appears to be running:
 
@@ -552,6 +552,7 @@ Sections:
 - 接口地址
 - 模型
 - API Key
+- 整理要求
 - 测试连接
 
 Button labels:
@@ -559,6 +560,10 @@ Button labels:
 - `保存`
 - `测试`
 - `清空`
+
+整理要求 placeholder:
+
+- `例如：帮我清理掉魔兽世界，我不玩了`
 
 ### 整理规则
 

@@ -15,6 +15,23 @@ The AI does not directly rewrite or delete bookmarks. It proposes:
 
 The user reviews and applies proposals in browser-switch.
 
+## 1.1 User Cleanup Instruction
+
+The UI must include a free-form text box named `整理要求`.
+
+Examples:
+
+- `帮我清理掉魔兽世界，我不玩了`
+- `不要保留购物网站`
+- `把 AI 工具单独整理清楚`
+
+Behavior:
+
+- The text is sent to the AI prompt as `user_instruction`.
+- If the instruction asks to remove or exclude a topic, matching bookmarks should be marked as excluded and not selected for write-back.
+- Local rule fallback should handle obvious exclusion requests, such as `魔兽世界`, `WoW`, `World of Warcraft`, and `Warcraft`.
+- The instruction is saved locally with AI settings and must not be committed to Git.
+
 ## 2. Cleanup Modes
 
 ### 快速整理

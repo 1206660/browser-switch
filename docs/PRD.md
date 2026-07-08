@@ -105,7 +105,7 @@ Required:
 - Generate a preview/diff before write-back.
 - Write accepted cleanup results directly into Chrome bookmark bar.
 - Do not create an extra `browser-switch` parent folder.
-- Clean previous generated category folders before repeated writes.
+- Clear the current Chrome bookmark bar before writing reviewed results.
 - Remove the legacy `browser-switch` folder if it exists.
 - Support restoring Chrome bookmarks from a backup.
 
@@ -383,7 +383,7 @@ V0.1 is acceptable when:
 - Accepted Chrome cleanup results can be written into Chrome.
 - Accepted Firefox cleanup results can be written into Chrome.
 - No extra `browser-switch` parent folder is created.
-- Previous generated category folders are cleaned before write.
+- Current Chrome bookmark bar is cleared before write.
 - The Firefox profile remains untouched.
 - The user can export a cleaned bookmark HTML file as a fallback.
 

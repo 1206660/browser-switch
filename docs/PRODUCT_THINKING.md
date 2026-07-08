@@ -170,7 +170,7 @@ This gives the user control and makes repeated cleanup possible.
 | --- | --- | --- |
 | AI misclassifies bookmarks | Bad categories reduce trust | Show confidence, reason, and review queue |
 | User fears data loss | Bookmarks may be personally important | Back up before import/write/restore; Firefox read-only |
-| Chrome write-back breaks existing bookmarks | Chrome is the V0.1 target | Back up first, write directly to bookmark bar, and clean previous generated category folders |
+| Chrome write-back replaces bookmark bar | Chrome is the V0.1 target | Back up first, clear bookmark bar, write reviewed categories, and allow restore |
 | Dead-link checks are slow | Thousands of bookmarks can take time | Queue with progress, timeout, concurrency |
 | Firefox DB is locked | Firefox may be running | Copy DB first; show clear error if copy fails |
 | Bookmark titles are multilingual | User may have Chinese and English links | Prompt and title limits must support both |

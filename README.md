@@ -56,4 +56,4 @@ pnpm tauri:build
 - 写入 Chrome 前自动备份 `Bookmarks`。
 - 写入后自动重新打开 Chrome。
 - 不增加 `browser-switch` 外层目录，直接在书签栏写入 AI 分类文件夹。
-- 写入前会清理上一次生成的分类文件夹和旧 `browser-switch` 目录。
+- 写入前会清空当前 Chrome 书签栏，整理前内容可从自动备份还原。

@@ -93,9 +93,9 @@ browser-switch writes cleaned category folders directly under Chrome bookmark ba
 Behavior:
 
 - No extra `browser-switch` parent folder is created.
-- On each write, browser-switch removes previous generated category folders from the bookmark bar.
+- On each write, browser-switch clears the current bookmark bar before writing the reviewed result.
 - The old `browser-switch` folder from earlier builds is also removed.
-- Chrome bookmarks with unrelated names are preserved.
+- The pre-write Chrome `Bookmarks` backup is the restore point for the previous bookmark bar.
 
 ### Write To Other Bookmarks
 
@@ -149,7 +149,7 @@ Write strategy:
 
 - Preserve existing root objects and metadata.
 - Use `roots.bookmark_bar` as the write target.
-- Remove previous generated category folders from bookmark bar before writing.
+- Clear `roots.bookmark_bar.children` before writing.
 - Remove legacy `browser-switch` folder if present.
 - Generate new IDs/guids if needed.
 - Preserve original URLs.
@@ -209,5 +209,5 @@ Chrome write-back is acceptable when:
 - The app creates a Chrome `Bookmarks` backup before every write.
 - The app can restore Chrome `Bookmarks` from a backup.
 - No extra `browser-switch` parent folder is created.
-- Previous generated category folders are cleaned before write.
+- Current Chrome bookmark bar is cleared before write.
 - Firefox is never modified in V0.1.
