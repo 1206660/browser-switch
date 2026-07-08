@@ -508,35 +508,32 @@ async fn organize_bookmarks_ai(
     let input_items: Vec<Value> = bookmarks
         .iter()
         .map(|bookmark| {
-            json!({
-                "id": bookmark.id,
-                "title": bookmark.title,
-                "url": bookmark.url,
-                "domain": domain_of(&bookmark.url),
-                "original_folder_path": bookmark.folder_path,
-                "source_browser": bookmark.source_browser
-            })
+            json!([
+                bookmark.id,
+                bookmark.title,
+                bookmark.url,
+                bookmark.folder_path
+            ])
         })
         .collect();
 
     let prompt = json!({
-        "directory_hierarchy": {
+        "d": {
             "公司": ["项目/<项目名>", "开发技术", "办公协作", "设计素材", "AI 工具"],
             "家庭": ["生活日常", "购物消费", "投资理财", "健康医疗", "房车出行"],
             "个人": ["学习成长", "效率工具", "资料库", "账号服务"],
             "休闲": ["游戏", "影音娱乐", "社交社区", "新闻资讯"],
             "其他": ["待确认"]
         },
-        "rules": {
-            "category": "category 必须是目录路径，用 / 分隔，例如 公司/项目/browser-switch、公司/开发技术、家庭/购物消费、休闲/游戏、个人/学习成长、其他/待确认。能识别项目名时优先放入 公司/项目/<项目名>。",
-            "title": "改良标题：中文尽量不超过15字，英文尽量不超过30字符；保留产品名/项目名；去掉站点噪音后缀如 - 知乎、| GitHub、- Google Search；不要编造。",
-            "summary": "中文摘要不超过30字，用来说明这个页面是做什么的",
-            "tags": "返回2到5个具体标签，不要返回网站、工具、资源这类泛词",
-            "exclude": "如果用户要求清理掉、删除、不再保留某类书签，将对应项 exclude 设为 true",
-            "output": "只返回JSON，不要Markdown，不要解释"
+        "r": {
+            "i": "每个输入项格式为 [id,title,url,folder]。",
+            "c": "目录路径，用 / 分隔。例：公司/项目/项目名、公司/开发技术、家庭/幼儿园、腾讯云/服务、Github/项目、休闲/游戏、其他/待确认。",
+            "t": "精简标题，中文不超过15字，英文不超过30字符；保留产品名/项目名；去掉噪音后缀；不要编造。",
+            "x": "用户要求清理/删除/废弃的项目返回 1，否则 0。",
+            "o": "只返回 JSON：{\"items\":[{\"id\":\"原id\",\"c\":\"目录路径\",\"t\":\"新标题\",\"x\":0}]}"
         },
-        "user_instruction": settings.cleanup_instruction,
-        "items": input_items
+        "u": settings.cleanup_instruction,
+        "i": input_items
     });
 
     let body = json!({
@@ -547,7 +544,7 @@ async fn organize_bookmarks_ai(
         "messages": [
             {
                 "role": "system",
-                "content": "你是一个中文书签整理助手。你只生成整理建议，不删除、不移动真实书签。category 必须返回目录路径，用 / 分隔，适合直接写入 Chrome 书签栏的嵌套文件夹。输出必须是 JSON，格式为 {\"items\":[{\"id\":\"...\",\"category\":\"公司/项目/项目名\",\"title\":\"...\",\"summary\":\"...\",\"tags\":[\"...\"],\"confidence\":0.8,\"reason\":\"...\",\"exclude\":false}]}。如果用户要求清理掉某个主题，对匹配书签返回 exclude:true。"
+                "content": "你是中文书签整理器。输入字段很短：d=目标目录参考，u=用户要求，i=书签数组，每项为 [id,title,url,folder]。只生成整理建议，不删除真实书签。必须只返回 JSON，不要 Markdown，不要解释。输出格式固定为 {\"items\":[{\"id\":\"原id\",\"c\":\"目录路径\",\"t\":\"新标题\",\"x\":0}]}。c 是要写入 Chrome 书签栏的目录路径，t 是精简标题，x=1 表示按用户要求排除。必须覆盖每个输入 id。"
             },
             {
                 "role": "user",
@@ -632,20 +629,33 @@ async fn organize_bookmarks_ai(
             .and_then(Value::as_str)
             .ok_or_else(|| "AI 返回项缺少 id".to_string())?
             .to_string();
+        let category = item
+            .get("c")
+            .or_else(|| item.get("category"))
+            .and_then(Value::as_str)
+            .unwrap_or("其他")
+            .trim()
+            .to_string();
+        let title = item
+            .get("t")
+            .or_else(|| item.get("title"))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let exclude = item
+            .get("x")
+            .and_then(|value| {
+                value
+                    .as_bool()
+                    .or_else(|| value.as_i64().map(|number| number != 0))
+            })
+            .or_else(|| item.get("exclude").and_then(Value::as_bool))
+            .unwrap_or(false);
         suggestions.push(AiSuggestion {
             id,
-            category: item
-                .get("category")
-                .and_then(Value::as_str)
-                .unwrap_or("其他")
-                .trim()
-                .to_string(),
-            title: item
-                .get("title")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .trim()
-                .to_string(),
+            category,
+            title,
             summary: item
                 .get("summary")
                 .and_then(Value::as_str)
@@ -675,10 +685,7 @@ async fn organize_bookmarks_ai(
                 .unwrap_or("")
                 .trim()
                 .to_string(),
-            exclude: item
-                .get("exclude")
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
+            exclude,
         });
     }
 
