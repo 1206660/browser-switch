@@ -2,7 +2,7 @@
 
 ## 1. Design Direction
 
-browser-switch V0.1 is a Chinese-first desktop utility for cleaning Firefox bookmarks.
+browser-switch V0.1 is a Chinese-first desktop utility for cleaning Chrome and Firefox bookmarks, then writing accepted results into Google Chrome.
 
 The interface should be calm, dense, and direct. It should not feel like a marketing website. The user opens it to finish a task: import bookmarks, organize them, review changes, and export a clean result.
 
@@ -23,6 +23,7 @@ Use:
 - 整理
 - 审核
 - 导出
+- 写入 Chrome
 - 重试
 - 跳过
 - 应用
@@ -105,8 +106,9 @@ Items:
 5. 重复项
 6. 失效链接
 7. 待审核
-8. 导出
-9. 设置
+8. 写入 Chrome
+9. 导出
+10. 设置
 
 Each item shows a count when useful:
 
@@ -140,12 +142,23 @@ Optional later:
 
 Purpose:
 
-Get the user's Firefox bookmarks into the app safely.
+Get Chrome or Firefox bookmarks into the app safely.
 
 Main copy:
 
-- Title: `导入 Firefox 书签`
-- Description: `只读取副本，不会修改原始收藏夹。`
+- Title: `导入书签`
+- Description: `导入时只读取副本，确认后再写入 Chrome。`
+
+Source choices:
+
+- `Google Chrome`
+- `Firefox`
+- `HTML 文件`
+
+Helper text:
+
+- Chrome: `先整理 Chrome，再写回 Chrome`
+- Firefox: `整理 Firefox，确认后写入 Chrome`
 
 Primary actions:
 
@@ -166,8 +179,8 @@ Buttons:
 
 States:
 
-- Loading: `正在查找 Firefox 配置...`
-- Empty: `没有找到 Firefox 配置`
+- Loading: `正在查找浏览器配置...`
+- Empty: `没有找到浏览器配置`
 - Error: `无法读取配置`
 
 ### Screen: Import Summary
@@ -436,11 +449,69 @@ Actions:
 - `保留`
 - `稍后再查`
 
-## 11. Export Screen
+## 11. Write To Chrome Screen
 
 Purpose:
 
-Export a cleaned bookmark HTML file for manual Firefox import.
+Write accepted cleanup results into Google Chrome.
+
+Title:
+
+- `写入 Chrome`
+
+Summary:
+
+- 来源: `Google Chrome` or `Firefox`
+- 目标: `Google Chrome`
+- 配置: target profile path
+- 写入方式: `browser-switch 文件夹`
+
+Preview metrics:
+
+- 将写入
+- 将创建文件夹
+- 跳过重复项
+- 跳过失效链接
+- 未审核项目
+
+Options:
+
+- `包含未审核项目`
+- `包含失效链接`
+- `写入前打开备份文件夹`
+
+Primary action:
+
+- `写入 Chrome`
+
+Secondary actions:
+
+- `预览`
+- `取消`
+- `打开备份`
+
+Required warning:
+
+- `写入前会自动备份 Chrome 收藏夹。请先关闭 Chrome。`
+
+If Chrome appears to be running:
+
+- `请关闭 Chrome 后再写入`
+- Button: `重新检测`
+
+Success state:
+
+- `已写入 Chrome`
+- `已备份原收藏夹`
+- Actions:
+  - `打开备份`
+  - `还原 Chrome`
+
+## 12. Export Screen
+
+Purpose:
+
+Export a cleaned bookmark HTML file as a fallback and portable backup.
 
 Options:
 
@@ -462,13 +533,13 @@ Success state:
 
 Warning:
 
-- `导出的文件不会自动覆盖 Firefox 收藏夹。`
+- `导出的文件不会自动覆盖浏览器收藏夹。`
 
-## 12. Settings
+## 13. Settings
 
 Sections:
 
-### Firefox
+### 浏览器
 
 - 当前配置
 - 配置路径
@@ -501,13 +572,20 @@ Button labels:
 - 主题: 深色 / 浅色 / 跟随系统
 - 密度: 紧凑 / 标准
 
+### 备份
+
+- 备份列表
+- 还原 browser-switch
+- 还原 Chrome
+- 打开备份文件夹
+
 ## 13. Empty States
 
 Keep empty states short.
 
 | Screen | Empty Text | Action |
 | --- | --- | --- |
-| 全部 | `还没有导入书签` | `导入 Firefox` |
+| 全部 | `还没有导入书签` | `导入书签` |
 | 重复项 | `没有发现重复项` | none |
 | 失效链接 | `还没有检测失效链接` | `开始检测` |
 | 待审核 | `没有待审核项目` | `开始整理` |
@@ -520,7 +598,9 @@ Error messages should say what happened and what to do next.
 Examples:
 
 - `无法复制 places.sqlite。请关闭 Firefox 后重试。`
+- `无法读取 Chrome 书签。请关闭 Chrome 后重试。`
 - `AI 请求失败。请检查 API Key 或接口地址。`
+- `写入 Chrome 失败。已保留备份，可稍后还原。`
 - `导出失败。请检查目标文件夹权限。`
 - `部分链接检测失败，可稍后重试。`
 
@@ -531,6 +611,7 @@ V0.1 useful shortcuts:
 - `Ctrl+K`: 搜索
 - `Ctrl+I`: 导入
 - `Ctrl+R`: 开始整理
+- `Ctrl+W`: 写入 Chrome
 - `Ctrl+E`: 导出
 - `Enter`: 打开选中书签
 - `A`: 接受选中审核项
@@ -550,8 +631,9 @@ Required V0.1 screens:
 6. 重复项
 7. 失效链接
 8. 待审核
-9. 导出
-10. 设置
+9. 写入 Chrome
+10. 导出
+11. 设置
 
 Recommended build order:
 
@@ -560,7 +642,7 @@ Recommended build order:
 3. 全部书签.
 4. 总览.
 5. 待审核.
-6. 导出.
-7. 设置.
-8. 重复项 and 失效链接 refinement.
-
+6. 写入 Chrome.
+7. 导出.
+8. 设置.
+9. 重复项 and 失效链接 refinement.

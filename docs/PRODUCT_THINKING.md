@@ -4,17 +4,19 @@
 
 browser-switch should first win by solving one painful, concrete job:
 
-> I have a large, messy Firefox bookmark library. Help me turn it into something I can search, trust, and reuse.
+> Help me use AI to organize Chrome bookmarks first, then bring my messy Firefox bookmarks into a clean Chrome bookmark structure.
 
-The first useful version is closer to a local cleanup workbench than a sync platform. It should feel like opening a messy drawer, seeing what is inside, asking AI to propose an organized structure, and approving the parts that look right.
+The first useful version is closer to a local cleanup and migration workbench than a sync platform. It should feel like opening a messy drawer, seeing what is inside, asking AI to propose an organized structure, approving the parts that look right, and writing the result into Chrome safely.
 
 ## 2. Primary User
 
-The primary user is a heavy bookmark collector using Firefox on Windows.
+The primary user is a heavy bookmark collector on Windows who wants to use Chrome as the cleaned bookmark destination.
 
 Observed assumptions:
 
 - Hundreds or thousands of bookmarks.
+- Chrome bookmarks may be less important and are suitable for first testing.
+- Firefox bookmarks may contain the real messy library.
 - Many old pages are dead.
 - Many duplicates exist because the same page was saved multiple times.
 - Folder names are inconsistent or outdated.
@@ -40,14 +42,15 @@ Signals:
 
 ### Job 2: Clean Without Fear
 
-When I run cleanup, I want the tool to show suggestions before applying them, so I do not lose useful bookmarks or break my Firefox data.
+When I run cleanup, I want the tool to show suggestions before applying them, so I do not lose useful bookmarks or break my browser data.
 
 Signals:
 
 - Original data is always visible.
 - Proposed changes are separate.
 - Bulk operations can be filtered.
-- Export is reversible and does not touch Firefox directly.
+- Chrome write-back is backed up and reversible.
+- Firefox is read-only in V0.1.
 
 ### Job 3: Find Things Again
 
@@ -78,8 +81,8 @@ Signals:
 
 Local-first is the correct starting point because:
 
-- The user has one immediate machine and one messy Firefox profile.
-- Reading Firefox data is inherently local.
+- The user has one immediate machine, Chrome for testing, and Firefox as the main messy source.
+- Reading Chrome and Firefox data is inherently local.
 - Bookmarks are private.
 - Server sync adds complexity before the core organizer has proven value.
 
@@ -97,6 +100,7 @@ AI should not control destructive operations in V0.1:
 
 - No silent deletes.
 - No direct Firefox write-back.
+- No Chrome write-back without backup, preview, and confirmation.
 - No automatic category overwrite without review.
 
 ### Prefer A Workbench Over A Wizard
@@ -107,7 +111,8 @@ A setup wizard is useful for first import, but the core product should be a work
 - Run cleanup jobs.
 - Review proposals.
 - Filter risky items.
-- Export results.
+- Write accepted results to Chrome.
+- Export results as a fallback.
 
 This gives the user control and makes repeated cleanup possible.
 
@@ -116,6 +121,8 @@ This gives the user control and makes repeated cleanup possible.
 ### Must Have
 
 - Firefox profile detection.
+- Chrome profile detection.
+- Safe import from copied Chrome `Bookmarks` JSON.
 - Safe import from copied `places.sqlite`.
 - Local database.
 - Original folder view.
@@ -123,7 +130,9 @@ This gives the user control and makes repeated cleanup possible.
 - Dead-link detection.
 - AI cleanup proposals.
 - Review queue.
-- HTML export.
+- Chrome write-back into managed `browser-switch` folder.
+- Chrome backup and restore.
+- HTML export fallback.
 
 ### Should Have
 
@@ -148,8 +157,9 @@ This gives the user control and makes repeated cleanup possible.
 - Official cloud.
 - Cross-device sync.
 - Browser extension.
-- Chrome/Edge/Safari support.
+- Edge/Safari support.
 - Direct write-back into Firefox.
+- Direct merge into existing Chrome root folders.
 - Semantic vector search.
 - Full-page archive.
 
@@ -158,7 +168,8 @@ This gives the user control and makes repeated cleanup possible.
 | Risk | Why It Matters | Product Response |
 | --- | --- | --- |
 | AI misclassifies bookmarks | Bad categories reduce trust | Show confidence, reason, and review queue |
-| User fears data loss | Bookmarks may be personally important | Never modify Firefox DB; export only |
+| User fears data loss | Bookmarks may be personally important | Back up before import/write/restore; Firefox read-only |
+| Chrome write-back breaks existing bookmarks | Chrome is the V0.1 target | Write only into managed `browser-switch` folder and preserve other folders |
 | Dead-link checks are slow | Thousands of bookmarks can take time | Queue with progress, timeout, concurrency |
 | Firefox DB is locked | Firefox may be running | Copy DB first; show clear error if copy fails |
 | Bookmark titles are multilingual | User may have Chinese and English links | Prompt and title limits must support both |
@@ -170,11 +181,14 @@ This gives the user control and makes repeated cleanup possible.
 V0.1 should be judged by practical outcomes:
 
 - Import succeeds on the user's real Firefox profile.
+- Import succeeds on the user's Chrome profile.
 - At least 90% of bookmarks are visible with correct URLs and folders.
 - Exact duplicates are identified reliably.
 - Dead-link checker completes without freezing the UI.
 - AI proposals are good enough that the user accepts a meaningful batch.
-- Exported HTML imports into Firefox successfully.
+- Accepted Chrome cleanup results can be written into Chrome.
+- Accepted Firefox cleanup results can be written into Chrome.
+- Chrome can be restored from a pre-write backup.
 - The user can find previously lost bookmarks through search/category/tag.
 
 ## 8. Product Shape After V0.1
@@ -182,9 +196,8 @@ V0.1 should be judged by practical outcomes:
 If V0.1 works, expand in this order:
 
 1. Improve category editing and rule customization.
-2. Add Chrome/Edge import.
-3. Add direct write-back with backup and dry-run diff.
+2. Improve Chrome write-back diff and restore.
+3. Add Edge import.
 4. Add browser extension for new bookmarks.
 5. Add semantic search.
 6. Add sync service only after local organizer is valuable.
-

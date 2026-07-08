@@ -277,6 +277,7 @@ AI must never decide these actions alone:
 - Permanently remove duplicate.
 - Mark link as dead without network check.
 - Write changes to Firefox.
+- Write changes to Chrome without backup, preview, and user confirmation.
 - Export without user action.
 
 AI may suggest:
@@ -306,4 +307,3 @@ The first AI feature to implement should be:
 > Run AI cleanup on selected bookmarks and show proposals in 待审核.
 
 Do not start with a huge all-bookmarks automation flow. Selected-batch AI cleanup is easier to test, cheaper, and safer.
-

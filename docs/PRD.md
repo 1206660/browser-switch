@@ -6,40 +6,50 @@
 
 ## 1. Product Direction
 
-browser-switch starts as a personal Firefox bookmark organizer.
+browser-switch starts as a personal browser bookmark organizer with Google Chrome as the first write target.
 
-The first version is not a cross-browser sync platform. It is a local-first desktop tool that imports a messy Firefox bookmark library, uses rules and AI to generate a cleanup plan, lets the user review the plan, and then applies the accepted changes to browser-switch's own library or exports a cleaned bookmark file.
+The first version is not a cross-browser sync platform. It is a local-first desktop tool that imports Chrome or Firefox bookmarks, uses rules and AI to generate a cleanup plan, lets the user review the plan, and then writes accepted results into a managed Google Chrome bookmark folder.
 
 The product goal for the first milestone is simple:
 
-> Turn my current Firefox bookmark mess into a searchable, categorized, deduplicated bookmark knowledge base.
+> Read Chrome bookmarks, organize them with AI, confirm the result, and write them back to Chrome. Then read Firefox bookmarks, organize them with AI, confirm the result, and write them into Chrome.
 
 ## 2. MVP Principles
 
 1. Protect the original Firefox data.
    The app must never modify Firefox's `places.sqlite` directly in V0.1. It reads from a copied database file or HTML export only.
 
-2. Optimize for one real user first.
+2. Protect all source browser data.
+   Chrome and Firefox imports must read from copied source files only. The app must create backups before import, cleanup apply, and restore.
+
+3. Chrome is the V0.1 write target.
+   Confirmed cleanup results can be written to Google Chrome, but only after backup, preview, and explicit confirmation.
+
+4. Optimize for one real user first.
    All flows should serve a single local user on one machine before adding accounts, cloud sync, teams, or browser extensions.
 
-3. AI should propose, not silently rewrite.
+5. AI should propose, not silently rewrite.
    AI-generated titles, categories, summaries, and tags are shown as a reviewable plan. The user can accept, reject, or edit changes.
 
-4. Rules provide a reliable baseline.
+6. Rules provide a reliable baseline.
    URL normalization, duplicate detection, dead-link checks, and domain-based categories should work without an AI API key.
 
-5. Keep the architecture upgradeable.
-   Local-first V0.1 should not block later server sync, Chrome import, browser extensions, or semantic search.
+7. Keep the architecture upgradeable.
+   Local-first V0.1 should not block later server sync, browser extensions, more browser imports, or semantic search.
 
 ## 3. In Scope For V0.1
 
-### 3.1 Firefox Import
+### 3.1 Browser Import
 
 Required:
 
+- Auto-detect Chrome profiles on Windows.
+- Import Chrome `Bookmarks` JSON for early low-risk testing.
 - Auto-detect Firefox profiles on Windows.
 - Let the user select a profile if multiple profiles exist.
-- Copy `places.sqlite` to an app temp/import directory before reading.
+- Copy browser source files to an app temp/import directory before reading.
+- For Firefox, copy `places.sqlite`.
+- For Chrome, copy the `Bookmarks` JSON file.
 - Import bookmarks, folders, URLs, titles, timestamps, visit counts, and favicon references when available.
 - Preserve original folder hierarchy.
 - Record import batches so the user can compare different runs.
@@ -51,8 +61,8 @@ Fallback:
 Out of scope:
 
 - Writing directly back into Firefox.
-- Realtime Firefox monitoring.
-- Firefox extension.
+- Realtime browser monitoring.
+- Browser extensions.
 
 ### 3.2 Local Bookmark Library
 
@@ -64,7 +74,53 @@ Required:
 - Track source browser and source profile.
 - Keep accepted AI/rule changes separate from original imported values.
 
-### 3.3 Rule-Based Cleanup
+### 3.3 Backup And Restore
+
+Required:
+
+- Create a source snapshot before every import.
+- Create an app database backup before applying a cleanup plan.
+- Create a backup before restoring to a previous version.
+- Provide backup history under `设置 -> 备份`.
+- Allow restoring browser-switch local data to a previous app-state backup.
+- Record export history.
+
+V0.1 restore target:
+
+- Restore browser-switch local database only.
+- Restore Chrome bookmarks from a Chrome `Bookmarks` backup after user confirmation.
+
+Out of scope:
+
+- Automatically overwriting Firefox bookmark files.
+- Direct Firefox restore without dry-run diff.
+
+### 3.4 Chrome Write-Back
+
+Required:
+
+- Let the user choose a target Chrome profile.
+- Create a backup of the target Chrome `Bookmarks` file before every write.
+- Require Chrome to be closed before write-back by default.
+- Generate a preview/diff before write-back.
+- Write accepted cleanup results into a managed top-level folder named `browser-switch`.
+- Replace only the managed `browser-switch` folder on repeated writes.
+- Preserve existing Chrome bookmarks outside the managed folder.
+- Support restoring Chrome bookmarks from a backup.
+
+Default write structure:
+
+- `browser-switch/AI 分类/<category>`
+- `browser-switch/待确认`
+- `browser-switch/失效链接`
+
+Out of scope:
+
+- Merging directly into Chrome's existing root folders.
+- Writing rejected items by default.
+- Writing directly into Firefox.
+
+### 3.5 Rule-Based Cleanup
 
 Required:
 
@@ -92,7 +148,7 @@ Required:
 - Detect dead links with bounded concurrency, timeout, and retry rules.
 - Prefer `HEAD`, fall back to `GET` when needed.
 
-### 3.4 AI Organizing
+### 3.6 AI Organizing
 
 Required:
 
@@ -118,11 +174,11 @@ Out of scope for V0.1:
 - Vector semantic search.
 - Fully automatic cleanup without review.
 
-### 3.5 Review And Apply Flow
+### 3.7 Review And Apply Flow
 
 Required flow:
 
-1. Import Firefox bookmarks.
+1. Import Chrome or Firefox bookmarks.
 2. Show import summary:
    - total bookmarks
    - total folders
@@ -141,18 +197,20 @@ Required flow:
    - tags and summary
 6. User can accept all, accept selected, reject selected, or edit selected.
 7. Accepted changes update browser-switch's local library.
-8. User can export cleaned bookmarks as HTML.
+8. User writes accepted results to Google Chrome.
+9. User can export cleaned bookmarks as HTML as a fallback.
 
 V0.1 apply target:
 
 - Apply to browser-switch local library.
-- Export cleaned HTML for manual import into Firefox.
+- Write accepted results to a managed Google Chrome folder.
+- Export cleaned HTML as a fallback and portable backup.
 
 Deferred apply target:
 
-- Write back to Firefox bookmarks after backup and explicit confirmation.
+- Direct Firefox write-back after backup, dry-run diff, and explicit confirmation.
 
-### 3.6 Desktop UI
+### 3.8 Desktop UI
 
 UI language:
 
@@ -171,6 +229,7 @@ Required layout:
   - 重复项
   - 失效链接
   - 待审核
+  - 写入 Chrome
   - 导出
   - 设置
 - Main area:
@@ -179,11 +238,12 @@ Required layout:
   - dense bookmark list
   - cleanup/review panel
 - Settings:
-  - Firefox 配置
+  - 浏览器配置
   - AI 设置
   - API Key
   - 整理规则
   - 导出路径
+  - 备份
 
 Interaction priorities:
 
@@ -199,10 +259,12 @@ These are intentionally not part of V0.1:
 - User accounts.
 - Cloud server.
 - Multi-device sync.
-- Chrome/Edge/Safari import.
+- Edge/Safari import.
 - Browser extension.
 - Realtime bookmark sync.
-- Direct browser write-back.
+- Direct write-back into Firefox.
+- Direct merge into existing Chrome root folders.
+- Direct Firefox write-back.
 - Semantic vector search.
 - Sharing folders.
 - SaaS billing.
@@ -246,9 +308,9 @@ When sync becomes necessary:
 | --- | --- | --- |
 | id | string | App-generated ID |
 | import_batch_id | string | Source import batch |
-| source_browser | string | `firefox` in V0.1 |
-| source_profile | string | Firefox profile path/name |
-| source_guid | string | Firefox bookmark GUID when available |
+| source_browser | string | `chrome` or `firefox` in V0.1 |
+| source_profile | string | Browser profile path/name |
+| source_guid | string | Browser bookmark GUID when available |
 | url | string | Original URL |
 | normalized_url | string | Cleanup comparison URL |
 | url_hash | string | Hash of normalized URL |
@@ -261,7 +323,7 @@ When sync becomes necessary:
 | summary | string | AI summary |
 | tags | string[] | AI/rule tags |
 | favicon | string | Icon URL/path |
-| visit_count | number | Firefox visit count when available |
+| visit_count | number | Browser visit count when available |
 | last_visited_at | number | Timestamp |
 | status | enum | active/duplicate/dead/archived/deleted |
 | review_status | enum | pending/accepted/rejected/edited |
@@ -275,7 +337,7 @@ When sync becomes necessary:
 | --- | --- | --- |
 | id | string | App-generated ID |
 | import_batch_id | string | Source batch |
-| source_guid | string | Firefox folder GUID when available |
+| source_guid | string | Browser folder GUID when available |
 | name | string | Folder name |
 | parent_id | string | Parent folder |
 | path | string | Full original path |
@@ -307,21 +369,30 @@ When sync becomes necessary:
 
 V0.1 is acceptable when:
 
+- The app can import the user's Chrome bookmarks from the local machine.
 - The app can import the user's Firefox bookmarks from the local machine.
 - The app shows the imported bookmarks with original folders.
+- The app creates backups before import, cleanup apply, Chrome write-back, and restore.
+- The app can restore browser-switch local data from a backup.
+- The app can restore Chrome bookmarks from a pre-write backup.
 - The app detects exact duplicate URLs.
 - The app can run dead-link checks without freezing the UI.
 - The app can generate AI categories, cleaned titles, summaries, and tags for a selected batch.
 - The user can review proposed changes before applying them.
 - Accepted changes are stored locally.
-- The user can export a cleaned bookmark HTML file.
-- The original Firefox profile remains untouched.
+- Accepted Chrome cleanup results can be written into Chrome.
+- Accepted Firefox cleanup results can be written into Chrome.
+- Existing Chrome bookmarks outside the managed `browser-switch` folder remain untouched.
+- The Firefox profile remains untouched.
+- The user can export a cleaned bookmark HTML file as a fallback.
 
 ## 8. Suggested Milestones
 
 ### Milestone 1: Import And View
 
 - Create Tauri + React app.
+- Detect Chrome profiles.
+- Read copied Chrome `Bookmarks` JSON.
 - Detect Firefox profiles.
 - Read copied `places.sqlite`.
 - Store bookmarks in local SQLite.
@@ -342,11 +413,14 @@ V0.1 is acceptable when:
 - AI result cache.
 - Review queue.
 
-### Milestone 4: Export
+### Milestone 4: Chrome Write-Back And Export
 
 - Apply accepted changes to local library.
-- Export cleaned HTML.
+- Write accepted results into Chrome's managed `browser-switch` folder.
+- Restore Chrome from backup if needed.
+- Export cleaned HTML as fallback.
 - Add import/export history.
+- Add backup history and local restore.
 
 ## 9. Open Decisions
 
@@ -358,3 +432,6 @@ V0.1 is acceptable when:
 
 3. Whether cleaned bookmarks should be written back to Firefox.
    Recommendation: do not write back in V0.1. Export HTML first.
+
+4. Whether Chrome should be supported before Firefox.
+   Recommendation: yes. Use Chrome as the first low-risk real import source, then add Firefox.
