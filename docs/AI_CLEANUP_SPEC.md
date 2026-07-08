@@ -277,6 +277,7 @@ Recommended V0.1 defaults:
 
 - Batch size: 120 bookmarks by default, so large bookmark sets are processed with fewer AI calls while still leaving room for prompt and response JSON.
 - If a batch returns truncated or invalid JSON, split that batch into smaller batches and retry automatically until the retry floor is reached.
+- AI parse failures append a local diagnostic record to `logs/ai.log` under the app data directory, without storing the API key.
 - The user-facing operation processes all selected bookmarks; batching is an internal implementation detail.
 - Retry failed batch once.
 - If a batch fails JSON validation, retry with smaller batch size.

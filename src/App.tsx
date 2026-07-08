@@ -1218,7 +1218,7 @@ function chunkArray<T>(items: T[], size: number) {
 }
 
 function isRecoverableAiJsonError(message: string) {
-  return /AI JSON|不是完整 JSON|缺少 items|EOF|expected|trailing characters|control character/i.test(message);
+  return /AI JSON|不是 JSON|不是完整 JSON|缺少 items|EOF|expected|trailing characters|control character/i.test(message);
 }
 
 function loadAiSettings(): AiSettings {

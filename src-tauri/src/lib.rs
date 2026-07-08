@@ -7,6 +7,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, HashMap},
     env, fs,
+    io::Write,
     path::{Path, PathBuf},
     process::Command,
     thread,
@@ -486,6 +487,7 @@ fn restore_chrome_backup(
 
 #[tauri::command]
 async fn organize_bookmarks_ai(
+    app: AppHandle,
     settings: AiSettings,
     bookmarks: Vec<BookmarkRecord>,
 ) -> Result<Vec<AiSuggestion>, String> {
@@ -580,13 +582,48 @@ async fn organize_bookmarks_ai(
         .and_then(|choice| choice.get("message"))
         .and_then(|message| message.get("content"))
         .and_then(Value::as_str)
-        .ok_or_else(|| format!("AI 响应缺少 message.content: {response_json}"))?;
+        .ok_or_else(|| {
+            let err = format!("AI 响应缺少 message.content: {response_json}");
+            let _ = append_ai_log(
+                &app,
+                "organize",
+                &settings.model,
+                bookmarks.len(),
+                "",
+                &err,
+                &response_json,
+            );
+            err
+        })?;
 
-    let parsed = parse_ai_content(content)?;
+    let parsed = parse_ai_content(content).map_err(|err| {
+        let _ = append_ai_log(
+            &app,
+            "organize",
+            &settings.model,
+            bookmarks.len(),
+            content,
+            &err,
+            &response_json,
+        );
+        err
+    })?;
     let items = parsed
         .get("items")
         .and_then(Value::as_array)
-        .ok_or_else(|| "AI JSON 缺少 items 数组".to_string())?;
+        .ok_or_else(|| {
+            let err = "AI JSON 缺少 items 数组".to_string();
+            let _ = append_ai_log(
+                &app,
+                "organize",
+                &settings.model,
+                bookmarks.len(),
+                content,
+                &err,
+                &response_json,
+            );
+            err
+        })?;
 
     let mut suggestions = Vec::new();
     for item in items {
@@ -650,6 +687,7 @@ async fn organize_bookmarks_ai(
 
 #[tauri::command]
 async fn analyze_bookmarks_ai(
+    app: AppHandle,
     settings: AiSettings,
     bookmarks: Vec<BookmarkRecord>,
 ) -> Result<BookmarkAnalysisReport, String> {
@@ -705,9 +743,32 @@ async fn analyze_bookmarks_ai(
         .and_then(|choice| choice.get("message"))
         .and_then(|message| message.get("content"))
         .and_then(Value::as_str)
-        .ok_or_else(|| format!("AI 诊断响应缺少 message.content: {response_json}"))?;
+        .ok_or_else(|| {
+            let err = format!("AI 诊断响应缺少 message.content: {response_json}");
+            let _ = append_ai_log(
+                &app,
+                "analysis",
+                &settings.model,
+                bookmarks.len(),
+                "",
+                &err,
+                &response_json,
+            );
+            err
+        })?;
 
-    let parsed = parse_ai_content(content)?;
+    let parsed = parse_ai_content(content).map_err(|err| {
+        let _ = append_ai_log(
+            &app,
+            "analysis",
+            &settings.model,
+            bookmarks.len(),
+            content,
+            &err,
+            &response_json,
+        );
+        err
+    })?;
     serde_json::from_value::<BookmarkAnalysisReport>(parsed)
         .map_err(|err| format!("AI 诊断 JSON 解析失败: {err}"))
 }
@@ -1156,12 +1217,68 @@ fn parse_ai_content(content: &str) -> Result<Value, String> {
 
     let start = content
         .find('{')
-        .ok_or_else(|| "AI 响应不是 JSON".to_string())?;
+        .ok_or_else(|| format!("AI 响应不是 JSON：{}", preview_text(content, 180)))?;
     let end = content
         .rfind('}')
-        .ok_or_else(|| "AI 响应不是完整 JSON".to_string())?;
+        .ok_or_else(|| format!("AI 响应不是完整 JSON：{}", preview_text(content, 180)))?;
     serde_json::from_str::<Value>(&content[start..=end])
         .map_err(|err| format!("AI JSON 解析失败: {err}"))
+}
+
+fn append_ai_log(
+    app: &AppHandle,
+    operation: &str,
+    model: &str,
+    bookmark_count: usize,
+    content: &str,
+    error: &str,
+    response_json: &Value,
+) -> Result<(), String> {
+    let dir = app_data_dir(app)?.join("logs");
+    fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
+    let path = dir.join("ai.log");
+    let finish_reason = response_json
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("finish_reason"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let record = json!({
+        "timestamp": Utc::now().to_rfc3339(),
+        "operation": operation,
+        "model": model,
+        "bookmark_count": bookmark_count,
+        "finish_reason": finish_reason,
+        "error": error,
+        "content_preview": preview_text(content, 2000)
+    });
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|err| err.to_string())?;
+    writeln!(
+        file,
+        "{}",
+        serde_json::to_string(&record).map_err(|err| err.to_string())?
+    )
+    .map_err(|err| err.to_string())
+}
+
+fn preview_text(content: &str, limit: usize) -> String {
+    let preview = content
+        .chars()
+        .take(limit)
+        .collect::<String>()
+        .replace('\r', "\\r")
+        .replace('\n', "\\n");
+
+    if preview.is_empty() {
+        "<空响应>".to_string()
+    } else {
+        preview
+    }
 }
 
 fn domain_of(url: &str) -> String {
