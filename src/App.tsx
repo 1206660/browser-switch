@@ -34,7 +34,7 @@ import {
   Wrench,
   XCircle
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type BrowserName = "chrome" | "firefox";
 
@@ -144,6 +144,7 @@ function App() {
   const [lastWrite, setLastWrite] = useState<ChromeWriteResult | null>(null);
   const [aiSettings, setAiSettings] = useState<AiSettings>(() => loadAiSettings());
   const [aiSettingsLoaded, setAiSettingsLoaded] = useState(false);
+  const autoImportedRef = useRef(false);
 
   useEffect(() => {
     void refreshProfiles();
@@ -208,6 +209,11 @@ function App() {
         if (source === "chrome") {
           setSelectedSourceProfilePath(defaultChrome.path);
         }
+        if (!autoImportedRef.current && bookmarks.length === 0 && !importInfo) {
+          autoImportedRef.current = true;
+          await importSelectedProfile(defaultChrome, { auto: true });
+          return;
+        }
       }
       if (firefox.length > 0 && source === "firefox") {
         setSelectedSourceProfilePath(preferredProfile(firefox).path);
@@ -233,7 +239,7 @@ function App() {
     }
   }
 
-  async function importSelectedProfile(profile: BrowserProfile) {
+  async function importSelectedProfile(profile: BrowserProfile, options?: { auto?: boolean }) {
     setLoading(true);
     setNotice(null);
     try {
@@ -253,7 +259,7 @@ function App() {
       setActiveNav("全部");
       setNotice({
         type: "ok",
-        text: `已导入 ${result.bookmarks.length} 条书签，导入前备份已创建`
+        text: `${options?.auto ? "已自动导入 Default：" : "已导入 "}${result.bookmarks.length} 条书签，导入前备份已创建`
       });
     } catch (error) {
       setNotice({ type: "error", text: String(error) });
