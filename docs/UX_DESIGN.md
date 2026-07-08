@@ -177,6 +177,11 @@ Buttons:
 - `导入`
 - `取消`
 
+Default behavior:
+
+- Select the browser `Default` profile automatically when available.
+- Import requires clicking `导入选中配置`; selecting a profile alone does not start import.
+
 States:
 
 - Loading: `正在查找浏览器配置...`
@@ -320,7 +325,20 @@ Show proposed changes clearly enough that the user can approve a large batch wit
 
 ### Default View
 
-Use a table with expandable detail rows.
+Use a directory tree preview, not a flat list.
+
+For AI cleanup, the tree shows the structure that will be written to Chrome:
+
+```text
+开发技术/
+AI 工具/
+设计素材/
+...
+```
+
+Each directory should have a stable category icon and item count.
+
+The old table view can return later as an advanced mode.
 
 Columns:
 

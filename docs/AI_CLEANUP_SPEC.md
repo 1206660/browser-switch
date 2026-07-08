@@ -121,26 +121,28 @@ Validation rules:
 
 Invalid model output should not be applied. Mark affected items as `AI 失败` and allow retry.
 
-## 5. Default Categories
+## 5. Default Directory Hierarchy
 
-Use Chinese category names in UI and AI prompts.
+Use Chinese directory paths in UI and AI prompts. The AI returns `category` as a folder path separated by `/`.
 
-| Category | Description |
+| Directory Path | Description |
 | --- | --- |
-| 开发技术 | Programming, docs, frameworks, libraries, APIs, engineering tools |
-| AI 工具 | AI apps, models, prompts, agents, AI services |
-| 设计素材 | Design systems, icons, UI inspiration, fonts, images, Figma resources |
-| 效率工具 | Productivity tools, automation, browser tools, workflows |
-| 学习资料 | Courses, tutorials, notes, books, knowledge articles |
-| 新闻资讯 | News, blogs, newsletters, media |
-| 投资理财 | Stocks, crypto, finance, business, markets |
-| 购物电商 | Shopping, product pages, coupons, marketplaces |
-| 社交社区 | Social networks, forums, communities |
-| 影音娱乐 | Video, music, streaming, entertainment |
-| 游戏 | Games, game tools, modding, game docs |
-| 生活日常 | Travel, food, health, local services, personal life |
-| 工作办公 | Docs, collaboration, company tools, admin portals |
-| 其他 | Unclear or mixed items |
+| 公司/项目/<项目名> | Project-specific tools, repos, docs, dashboards |
+| 公司/开发技术 | Programming, docs, frameworks, libraries, APIs |
+| 公司/办公协作 | Work docs, collaboration, company tools |
+| 公司/设计素材 | Design systems, icons, UI inspiration, Figma resources |
+| 公司/AI 工具 | AI apps, models, prompts, agents, AI services |
+| 家庭/生活日常 | Travel, food, health, local services |
+| 家庭/购物消费 | Shopping, product pages, coupons, marketplaces |
+| 家庭/投资理财 | Stocks, crypto, finance, business, markets |
+| 个人/学习成长 | Courses, tutorials, books, knowledge articles |
+| 个人/效率工具 | Productivity tools, automation, browser tools |
+| 休闲/游戏 | Games, game tools, modding, game docs |
+| 休闲/影音娱乐 | Video, music, streaming, entertainment |
+| 休闲/社交社区 | Social networks, forums, communities |
+| 其他/待确认 | Unclear or mixed items |
+
+Directory icons should be stable by directory meaning. For example, `公司` uses a briefcase icon, `家庭` uses a home icon, `休闲/游戏` uses a game icon, and `公司/开发技术` uses a code icon.
 
 ## 6. Title Rules
 
@@ -274,6 +276,7 @@ User content shape:
 Recommended V0.1 defaults:
 
 - Batch size: 20-40 bookmarks.
+- The user-facing operation processes all selected bookmarks; batching is an internal implementation detail.
 - Retry failed batch once.
 - If a batch fails JSON validation, retry with smaller batch size.
 - Cache results by hash of title + URL + folder path + category version.

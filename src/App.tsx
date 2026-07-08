@@ -3,9 +3,12 @@ import clsx from "clsx";
 import {
   ArchiveRestore,
   Bot,
+  Briefcase,
+  ChevronRight,
   CheckCircle2,
   Chrome,
   Code2,
+  Coffee,
   DatabaseBackup,
   DollarSign,
   Download,
@@ -16,7 +19,7 @@ import {
   Gauge,
   GraduationCap,
   Home,
-  KeyRound,
+  Library,
   Loader2,
   Newspaper,
   Palette,
@@ -78,6 +81,13 @@ type ViewBookmark = BookmarkRecord & {
   summary: string;
 };
 
+type BookmarkTreeNode = {
+  name: string;
+  path: string;
+  children: Map<string, BookmarkTreeNode>;
+  bookmarks: ViewBookmark[];
+};
+
 type Notice = {
   type: "ok" | "warn" | "error";
   text: string;
@@ -122,6 +132,7 @@ function App() {
   const [chromeProfiles, setChromeProfiles] = useState<BrowserProfile[]>([]);
   const [firefoxProfiles, setFirefoxProfiles] = useState<BrowserProfile[]>([]);
   const [source, setSource] = useState<BrowserName>("chrome");
+  const [selectedSourceProfilePath, setSelectedSourceProfilePath] = useState("");
   const [targetProfilePath, setTargetProfilePath] = useState("");
   const [bookmarks, setBookmarks] = useState<ViewBookmark[]>([]);
   const [importInfo, setImportInfo] = useState<ImportResult | null>(null);
@@ -148,6 +159,7 @@ function App() {
   }, [aiSettings, aiSettingsLoaded]);
 
   const sourceProfiles = source === "chrome" ? chromeProfiles : firefoxProfiles;
+  const selectedSourceProfile = sourceProfiles.find((profile) => profile.path === selectedSourceProfilePath) ?? sourceProfiles[0];
   const selectedCount = bookmarks.filter((item) => item.selected).length;
   const duplicateCount = bookmarks.filter((item) => item.status === "重复").length;
   const categoryCount = new Set(bookmarks.map((item) => item.category)).size;
@@ -178,6 +190,8 @@ function App() {
     });
   }, [activeNav, bookmarks, query]);
   const reviewGroups = useMemo(() => groupBookmarksForReview(filteredBookmarks), [filteredBookmarks]);
+  const originalTree = useMemo(() => buildBookmarkTree(filteredBookmarks, "folder"), [filteredBookmarks]);
+  const categoryTree = useMemo(() => buildBookmarkTree(filteredBookmarks, "category"), [filteredBookmarks]);
 
   async function refreshProfiles() {
     setLoading(true);
@@ -189,7 +203,14 @@ function App() {
       setChromeProfiles(chrome);
       setFirefoxProfiles(firefox);
       if (chrome.length > 0) {
-        setTargetProfilePath(chrome[0].path);
+        const defaultChrome = preferredProfile(chrome);
+        setTargetProfilePath(defaultChrome.path);
+        if (source === "chrome") {
+          setSelectedSourceProfilePath(defaultChrome.path);
+        }
+      }
+      if (firefox.length > 0 && source === "firefox") {
+        setSelectedSourceProfilePath(preferredProfile(firefox).path);
       }
       setNotice({ type: "ok", text: `已找到 Chrome ${chrome.length} 个配置，Firefox ${firefox.length} 个配置` });
     } catch (error) {
@@ -277,7 +298,7 @@ function App() {
       return;
     }
 
-    const targets = bookmarks.filter((item) => item.selected && item.status !== "重复").slice(0, 40);
+    const targets = bookmarks.filter((item) => item.selected && item.status !== "重复");
     if (targets.length === 0) {
       setNotice({ type: "warn", text: "没有可整理的选中书签" });
       return;
@@ -292,10 +313,16 @@ function App() {
     setLoading(true);
     setNotice({ type: "ok", text: `正在请求 AI 整理 ${targets.length} 条书签...` });
     try {
-      const suggestions = await invoke<AiSuggestion[]>("organize_bookmarks_ai", {
-        settings: aiSettings,
-        bookmarks: targets
-      });
+      const suggestions: AiSuggestion[] = [];
+      const batches = chunkArray(targets, 40);
+      for (let index = 0; index < batches.length; index += 1) {
+        setNotice({ type: "ok", text: `正在请求 AI：第 ${index + 1}/${batches.length} 批` });
+        const batchSuggestions = await invoke<AiSuggestion[]>("organize_bookmarks_ai", {
+          settings: aiSettings,
+          bookmarks: batches[index]
+        });
+        suggestions.push(...batchSuggestions);
+      }
       const suggestionMap = new Map(suggestions.map((item) => [item.id, item]));
       const seen = new Map<string, string>();
 
@@ -448,10 +475,6 @@ function App() {
               {loading ? <Loader2 className="animate-spin" size={16} /> : <DatabaseBackup size={16} />}
               重新扫描
             </button>
-            <button className="btn-primary" onClick={() => void runAiCleanup()} disabled={bookmarks.length === 0 || loading}>
-              <Bot size={16} />
-              AI 整理
-            </button>
           </header>
 
           {notice && (
@@ -473,13 +496,23 @@ function App() {
                 <div className="mb-3 grid grid-cols-2 gap-2">
                   <button
                     className={clsx("seg", source === "chrome" && "seg-active")}
-                    onClick={() => setSource("chrome")}
+                    onClick={() => {
+                      setSource("chrome");
+                      if (chromeProfiles.length > 0) {
+                        setSelectedSourceProfilePath(preferredProfile(chromeProfiles).path);
+                      }
+                    }}
                   >
                     Google Chrome
                   </button>
                   <button
                     className={clsx("seg", source === "firefox" && "seg-active")}
-                    onClick={() => setSource("firefox")}
+                    onClick={() => {
+                      setSource("firefox");
+                      if (firefoxProfiles.length > 0) {
+                        setSelectedSourceProfilePath(preferredProfile(firefoxProfiles).path);
+                      }
+                    }}
                   >
                     Firefox
                   </button>
@@ -490,12 +523,18 @@ function App() {
                   ) : (
                     sourceProfiles.map((profile) => (
                       <button
-                        className="w-full rounded-md border border-border bg-bg p-3 text-left hover:border-primary/60"
+                        className={clsx(
+                          "w-full rounded-md border bg-bg p-3 text-left hover:border-primary/60",
+                          selectedSourceProfile?.path === profile.path ? "border-primary/70 shadow-focus" : "border-border"
+                        )}
                         key={`${profile.browser}-${profile.path}`}
-                        onClick={() => void importSelectedProfile(profile)}
+                        onClick={() => setSelectedSourceProfilePath(profile.path)}
                       >
                         <div className="flex items-center justify-between">
-                          <span className="text-sm font-medium">{profile.name}</span>
+                          <span className="text-sm font-medium">
+                            {profile.name}
+                            {isDefaultProfile(profile) && <span className="ml-2 text-xs text-blue-200">默认</span>}
+                          </span>
                           <span className="rounded bg-panel2 px-2 py-0.5 text-xs text-muted">
                             {profile.browser === "chrome" ? "可写入" : "只读取"}
                           </span>
@@ -505,23 +544,16 @@ function App() {
                     ))
                   )}
                 </div>
+                <button
+                  className="btn-primary mt-3 w-full"
+                  disabled={!selectedSourceProfile || loading}
+                  onClick={() => selectedSourceProfile && void importSelectedProfile(selectedSourceProfile)}
+                >
+                  导入选中配置
+                </button>
               </Panel>
 
-              <Panel title="整理动作" icon={<Sparkles size={16} />}>
-                <div className="grid grid-cols-2 gap-2">
-                  <button className="btn-secondary" onClick={() => runCleanup("quick")} disabled={bookmarks.length === 0}>
-                    快速整理
-                  </button>
-                  <button className="btn-primary" onClick={() => void runAiCleanup()} disabled={bookmarks.length === 0 || loading}>
-                    AI 整理
-                  </button>
-                </div>
-                <div className="mt-3 text-xs leading-5 text-muted">
-                  未配置 API Key 时会使用本地规则。真实 AI 默认每次处理前 40 条选中书签，避免一次请求过大。
-                </div>
-              </Panel>
-
-              <Panel title="AI 设置" icon={<KeyRound size={16} />}>
+              <Panel title="AI 整理" icon={<Sparkles size={16} />}>
                 <label className="mb-1 block text-xs text-muted">接口地址</label>
                 <input
                   className="input mb-2"
@@ -555,6 +587,13 @@ function App() {
                 />
                 <div className="mt-2 text-xs leading-5 text-muted">
                   支持 OpenAI-compatible 接口。整理要求会随 AI 请求提交，本地也会先排除明确不要的主题。
+                </div>
+                <button className="btn-primary mt-3 w-full" onClick={() => void runAiCleanup()} disabled={bookmarks.length === 0 || loading}>
+                  <Bot size={16} />
+                  开始整理
+                </button>
+                <div className="mt-2 text-xs leading-5 text-muted">
+                  未配置 API Key 时会自动使用本地规则。真实 AI 会自动分批处理全部选中书签。
                 </div>
               </Panel>
 
@@ -635,14 +674,10 @@ function App() {
                       <ReviewGroup category={category} items={items} key={category} onToggle={toggleSelected} />
                     ))}
                   </div>
+                ) : activeNav === "AI 分类" ? (
+                  <TreeView node={categoryTree} onToggle={toggleSelected} />
                 ) : (
-                  filteredBookmarks.slice(0, 2000).map((bookmark) => (
-                    <BookmarkRow
-                      bookmark={bookmark}
-                      key={`${bookmark.source_browser}-${bookmark.id}-${bookmark.url}`}
-                      onToggle={toggleSelected}
-                    />
-                  ))
+                  <TreeView node={originalTree} onToggle={toggleSelected} />
                 )}
               </div>
             </div>
@@ -686,7 +721,50 @@ function ReviewGroup({
   );
 }
 
+function TreeView({ node, onToggle, depth = 0 }: { node: BookmarkTreeNode; onToggle: (id: string) => void; depth?: number }) {
+  const children = Array.from(node.children.values()).sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+  const bookmarks = [...node.bookmarks].sort((a, b) => a.title.localeCompare(b.title, "zh-CN"));
+
+  return (
+    <div>
+      {children.map((child) => {
+        const Icon = categoryIcon(child.name);
+        return (
+          <section key={child.path}>
+            <div
+              className="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-panel2 px-4 py-2 text-sm font-medium"
+              style={{ paddingLeft: `${16 + depth * 18}px` }}
+            >
+              <ChevronRight className="text-muted" size={14} />
+              <span className="grid h-7 w-7 place-items-center rounded-md bg-bg text-blue-200">
+                <Icon size={15} />
+              </span>
+              <span className="min-w-0 flex-1 truncate">{child.name}</span>
+              <span className="rounded bg-bg px-2 py-0.5 text-xs text-muted">{countTreeBookmarks(child)} 条</span>
+            </div>
+            <TreeView node={child} onToggle={onToggle} depth={depth + 1} />
+          </section>
+        );
+      })}
+      {bookmarks.map((bookmark) => (
+        <div
+          className="tree-bookmark"
+          key={`${bookmark.source_browser}-${bookmark.id}-${bookmark.url}`}
+          style={{ paddingLeft: `${26 + depth * 18}px` }}
+        >
+          <BookmarkRow bookmark={bookmark} onToggle={onToggle} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function categoryIcon(category: string) {
+  if (category.includes("公司")) return Briefcase;
+  if (category.includes("家庭")) return Home;
+  if (category.includes("个人")) return Users;
+  if (category.includes("休闲")) return Coffee;
+  if (category.includes("资料")) return Library;
   if (category.includes("开发")) return Code2;
   if (category.includes("AI")) return Bot;
   if (category.includes("设计")) return Palette;
@@ -715,7 +793,7 @@ function BookmarkRow({ bookmark, onToggle }: { bookmark: ViewBookmark; onToggle:
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <div className="truncate text-sm font-medium">{bookmark.title}</div>
-        <Badge tone={bookmark.status === "重复" || bookmark.status === "已排除" ? "warn" : "ok"}>{bookmark.status}</Badge>
+          <Badge tone={bookmark.status === "重复" || bookmark.status === "已排除" ? "warn" : "ok"}>{bookmark.status}</Badge>
           <Badge>{bookmark.category}</Badge>
         </div>
         <div className="mt-1 truncate text-xs text-muted">{bookmark.url}</div>
@@ -793,13 +871,17 @@ function cleanTitle(title: string, url: string) {
 
 function inferCategory(item: BookmarkRecord) {
   const text = `${item.title} ${item.url} ${item.folder_path}`.toLowerCase();
-  if (/(openai|chatgpt|deepseek|claude|gemini|qwen|ai)/.test(text)) return "AI 工具";
-  if (/(github|docs|developer|api|rust|react|typescript|npm|stackoverflow)/.test(text)) return "开发技术";
-  if (/(figma|dribbble|behance|icon|font|design)/.test(text)) return "设计素材";
-  if (/(notion|linear|trello|calendar|todo|workflow)/.test(text)) return "效率工具";
-  if (/(course|tutorial|learn|book|wiki|medium)/.test(text)) return "学习资料";
-  if (/(youtube|bilibili|netflix|music|video)/.test(text)) return "影音娱乐";
-  if (/(steam|game|epicgames|ign)/.test(text)) return "游戏";
+  if (/(browser-switch|slientresolve|logicmerger|项目|project)/.test(text)) return "公司/项目/待命名项目";
+  if (/(openai|chatgpt|deepseek|claude|gemini|qwen|ai)/.test(text)) return "公司/AI 工具";
+  if (/(github|docs|developer|api|rust|react|typescript|npm|stackoverflow)/.test(text)) return "公司/开发技术";
+  if (/(figma|dribbble|behance|icon|font|design)/.test(text)) return "公司/设计素材";
+  if (/(notion|linear|trello|calendar|todo|workflow)/.test(text)) return "个人/效率工具";
+  if (/(course|tutorial|learn|book|wiki|medium)/.test(text)) return "个人/学习成长";
+  if (/(finance|stock|crypto|tradingview|bank)/.test(text)) return "家庭/投资理财";
+  if (/(taobao|tmall|jd.com|amazon|shop|购物)/.test(text)) return "家庭/购物消费";
+  if (/(youtube|bilibili|netflix|music|video)/.test(text)) return "休闲/影音娱乐";
+  if (/(steam|game|epicgames|ign|warcraft|wow|魔兽)/.test(text)) return "休闲/游戏";
+  if (/(twitter|x.com|reddit|weibo|zhihu|discord)/.test(text)) return "休闲/社交社区";
   return item.category || "其他";
 }
 
@@ -828,6 +910,54 @@ function groupBookmarksForReview(bookmarks: ViewBookmark[]) {
     groups.set(category, [...(groups.get(category) ?? []), bookmark]);
   }
   return Array.from(groups.entries()).sort(([a], [b]) => a.localeCompare(b, "zh-CN"));
+}
+
+function buildBookmarkTree(bookmarks: ViewBookmark[], mode: "folder" | "category") {
+  const root: BookmarkTreeNode = { name: "root", path: "", children: new Map(), bookmarks: [] };
+
+  for (const bookmark of bookmarks) {
+    const parts =
+      mode === "category"
+        ? (bookmark.category.trim() || "其他/待确认")
+            .split("/")
+            .map((part) => part.trim())
+            .filter(Boolean)
+        : (bookmark.folder_path || "未分类")
+            .split("/")
+            .map((part) => part.trim())
+            .filter(Boolean);
+
+    let current = root;
+    for (const part of parts.length > 0 ? parts : ["未分类"]) {
+      const path = current.path ? `${current.path}/${part}` : part;
+      let child = current.children.get(part);
+      if (!child) {
+        child = { name: part, path, children: new Map(), bookmarks: [] };
+        current.children.set(part, child);
+      }
+      current = child;
+    }
+    current.bookmarks.push(bookmark);
+  }
+
+  return root;
+}
+
+function countTreeBookmarks(node: BookmarkTreeNode): number {
+  let count = node.bookmarks.length;
+  for (const child of node.children.values()) {
+    count += countTreeBookmarks(child);
+  }
+  return count;
+}
+
+function preferredProfile(profiles: BrowserProfile[]) {
+  return profiles.find(isDefaultProfile) ?? profiles[0];
+}
+
+function isDefaultProfile(profile: BrowserProfile) {
+  const name = profile.name.toLowerCase();
+  return name === "default" || name.includes("default-release") || name.includes(".default");
 }
 
 function shouldExcludeByInstruction(bookmark: BookmarkRecord, instruction: string) {
@@ -861,6 +991,14 @@ function shouldExcludeByInstruction(bookmark: BookmarkRecord, instruction: strin
     .filter((term) => term.length >= 2 && !/(帮我|清理|删除|去掉|不要|不保留|不写入|排除|我不|不玩了|不看了)/.test(term));
 
   return looseTerms.some((term) => text.includes(term));
+}
+
+function chunkArray<T>(items: T[], size: number) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
 }
 
 function loadAiSettings(): AiSettings {

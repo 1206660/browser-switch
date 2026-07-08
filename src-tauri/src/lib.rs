@@ -78,6 +78,12 @@ struct AiSuggestion {
     exclude: bool,
 }
 
+#[derive(Default)]
+struct ChromeFolderNode {
+    children: BTreeMap<String, ChromeFolderNode>,
+    bookmarks: Vec<BookmarkRecord>,
+}
+
 #[tauri::command]
 fn detect_chrome_profiles() -> Result<Vec<BrowserProfile>, String> {
     let local_app_data =
@@ -299,7 +305,8 @@ fn load_ai_settings(app: AppHandle) -> Result<Option<AiSettings>, String> {
     }
 
     let raw = fs::read_to_string(path).map_err(|err| format!("读取 AI 设置失败: {err}"))?;
-    let settings = serde_json::from_str::<AiSettings>(&raw).map_err(|err| format!("AI 设置解析失败: {err}"))?;
+    let settings = serde_json::from_str::<AiSettings>(&raw)
+        .map_err(|err| format!("AI 设置解析失败: {err}"))?;
     Ok(Some(settings))
 }
 
@@ -428,7 +435,6 @@ async fn organize_bookmarks_ai(
     let endpoint = chat_completions_endpoint(&settings.base_url);
     let input_items: Vec<Value> = bookmarks
         .iter()
-        .take(40)
         .map(|bookmark| {
             json!({
                 "id": bookmark.id,
@@ -442,12 +448,16 @@ async fn organize_bookmarks_ai(
         .collect();
 
     let prompt = json!({
-        "categories": [
-            "开发技术", "AI 工具", "设计素材", "效率工具", "学习资料", "新闻资讯", "投资理财",
-            "购物电商", "社交社区", "影音娱乐", "游戏", "生活日常", "工作办公", "其他"
-        ],
+        "directory_hierarchy": {
+            "公司": ["项目/<项目名>", "开发技术", "办公协作", "设计素材", "AI 工具"],
+            "家庭": ["生活日常", "购物消费", "投资理财", "健康医疗", "房车出行"],
+            "个人": ["学习成长", "效率工具", "资料库", "账号服务"],
+            "休闲": ["游戏", "影音娱乐", "社交社区", "新闻资讯"],
+            "其他": ["待确认"]
+        },
         "rules": {
-            "title": "中文标题尽量不超过15字，英文标题尽量不超过30字符，去掉站点噪音后缀",
+            "category": "category 必须是目录路径，用 / 分隔，例如 公司/项目/browser-switch、公司/开发技术、家庭/购物消费、休闲/游戏、个人/学习成长、其他/待确认。能识别项目名时优先放入 公司/项目/<项目名>。",
+            "title": "改良标题：中文尽量不超过15字，英文尽量不超过30字符；保留产品名/项目名；去掉站点噪音后缀如 - 知乎、| GitHub、- Google Search；不要编造。",
             "summary": "中文摘要不超过30字，用来说明这个页面是做什么的",
             "tags": "返回2到5个具体标签，不要返回网站、工具、资源这类泛词",
             "exclude": "如果用户要求清理掉、删除、不再保留某类书签，将对应项 exclude 设为 true",
@@ -464,7 +474,7 @@ async fn organize_bookmarks_ai(
         "messages": [
             {
                 "role": "system",
-                "content": "你是一个中文书签整理助手。你只生成整理建议，不删除、不移动真实书签。输出必须是 JSON，格式为 {\"items\":[{\"id\":\"...\",\"category\":\"...\",\"title\":\"...\",\"summary\":\"...\",\"tags\":[\"...\"],\"confidence\":0.8,\"reason\":\"...\",\"exclude\":false}]}。如果用户要求清理掉某个主题，对匹配书签返回 exclude:true。"
+                "content": "你是一个中文书签整理助手。你只生成整理建议，不删除、不移动真实书签。category 必须返回目录路径，用 / 分隔，适合直接写入 Chrome 书签栏的嵌套文件夹。输出必须是 JSON，格式为 {\"items\":[{\"id\":\"...\",\"category\":\"公司/项目/项目名\",\"title\":\"...\",\"summary\":\"...\",\"tags\":[\"...\"],\"confidence\":0.8,\"reason\":\"...\",\"exclude\":false}]}。如果用户要求清理掉某个主题，对匹配书签返回 exclude:true。"
             },
             {
                 "role": "user",
@@ -691,24 +701,49 @@ fn firefox_folder_path(parent_id: i64, folders: &HashMap<i64, (i64, String)>) ->
 }
 
 fn build_chrome_category_folders(bookmarks: &[BookmarkRecord], next_id: &mut u64) -> Vec<Value> {
-    let mut grouped: BTreeMap<String, Vec<&BookmarkRecord>> = BTreeMap::new();
+    let mut root = ChromeFolderNode::default();
     for bookmark in bookmarks {
-        let category = if bookmark.category.trim().is_empty() {
-            "其他"
-        } else {
-            bookmark.category.trim()
-        };
-        grouped
-            .entry(category.to_string())
-            .or_default()
-            .push(bookmark);
+        let path = category_path(&bookmark.category);
+        insert_chrome_folder_path(&mut root, &path, bookmark.clone());
     }
 
-    let mut category_folders = Vec::new();
-    for (category, items) in grouped {
-        let mut children = Vec::new();
-        for item in items {
-            children.push(json!({
+    chrome_folder_children_to_json(&root, next_id)
+}
+
+fn category_path(category: &str) -> Vec<String> {
+    let parts = category
+        .split('/')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+
+    if parts.is_empty() {
+        vec!["其他".to_string()]
+    } else {
+        parts
+    }
+}
+
+fn insert_chrome_folder_path(
+    node: &mut ChromeFolderNode,
+    path: &[String],
+    bookmark: BookmarkRecord,
+) {
+    let mut current = node;
+    for part in path {
+        current = current.children.entry(part.clone()).or_default();
+    }
+    current.bookmarks.push(bookmark);
+}
+
+fn chrome_folder_children_to_json(node: &ChromeFolderNode, next_id: &mut u64) -> Vec<Value> {
+    let mut values = Vec::new();
+
+    for (name, child) in &node.children {
+        let mut children = chrome_folder_children_to_json(child, next_id);
+        children.extend(child.bookmarks.iter().map(|item| {
+            json!({
                 "date_added": chrome_time_now(),
                 "date_last_used": "0",
                 "guid": Uuid::new_v4().to_string(),
@@ -716,22 +751,22 @@ fn build_chrome_category_folders(bookmarks: &[BookmarkRecord], next_id: &mut u64
                 "name": item.title,
                 "type": "url",
                 "url": item.url
-            }));
-        }
+            })
+        }));
 
-        category_folders.push(json!({
+        values.push(json!({
             "children": children,
             "date_added": chrome_time_now(),
             "date_last_used": "0",
             "date_modified": chrome_time_now(),
             "guid": Uuid::new_v4().to_string(),
             "id": next_chrome_id(next_id),
-            "name": category,
+            "name": name,
             "type": "folder"
         }));
     }
 
-    category_folders
+    values
 }
 
 fn remove_legacy_browser_switch_folders(roots: &mut serde_json::Map<String, Value>) {
