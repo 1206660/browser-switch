@@ -1,4 +1,5 @@
 use chrono::Utc;
+use reqwest::Client;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -8,6 +9,8 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
     process::Command,
+    thread,
+    time::Duration,
 };
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
@@ -52,6 +55,24 @@ struct ChromeWriteResult {
     written_count: usize,
     folder_count: usize,
     managed_folder: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AiSettings {
+    base_url: String,
+    model: String,
+    api_key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AiSuggestion {
+    id: String,
+    category: String,
+    title: String,
+    summary: String,
+    tags: Vec<String>,
+    confidence: f64,
+    reason: String,
 }
 
 #[tauri::command]
@@ -273,41 +294,46 @@ fn write_chrome_bookmarks(
     profile_path: String,
     bookmarks: Vec<BookmarkRecord>,
 ) -> Result<ChromeWriteResult, String> {
-    if chrome_running() {
-        return Err("请关闭 Chrome 后再写入".to_string());
-    }
-
     let target = PathBuf::from(&profile_path).join("Bookmarks");
     if !target.exists() {
         return Err("没有找到目标 Chrome Bookmarks 文件".to_string());
     }
+
+    let killed_chrome = if chrome_running() {
+        kill_chrome()?;
+        thread::sleep(Duration::from_millis(1200));
+        true
+    } else {
+        false
+    };
 
     let backup_path = backup_chrome_writeback(&app, &target)?;
     let raw = fs::read_to_string(&target).map_err(|err| err.to_string())?;
     let mut value: Value =
         serde_json::from_str(&raw).map_err(|err| format!("Chrome 书签 JSON 解析失败: {err}"))?;
     let mut next_id = max_chrome_id(&value) + 1;
-    let managed = build_managed_chrome_folder(&bookmarks, &mut next_id);
-    let folder_count = managed
-        .get("children")
-        .and_then(Value::as_array)
-        .map(|children| children.len())
-        .unwrap_or_default();
+    let category_names = generated_category_names(&bookmarks);
+    let category_folders = build_chrome_category_folders(&bookmarks, &mut next_id);
+    let folder_count = category_folders.len();
 
     let roots = value
         .get_mut("roots")
         .and_then(Value::as_object_mut)
         .ok_or_else(|| "Chrome Bookmarks 缺少 roots".to_string())?;
-    let other = roots
-        .get_mut("other")
-        .ok_or_else(|| "Chrome Bookmarks 缺少 other 节点".to_string())?;
-    let children = other
+    remove_legacy_browser_switch_folders(roots);
+    let bookmark_bar = roots
+        .get_mut("bookmark_bar")
+        .ok_or_else(|| "Chrome Bookmarks 缺少 bookmark_bar 节点".to_string())?;
+    let children = bookmark_bar
         .get_mut("children")
         .and_then(Value::as_array_mut)
-        .ok_or_else(|| "Chrome other 节点缺少 children".to_string())?;
+        .ok_or_else(|| "Chrome 书签栏缺少 children".to_string())?;
 
-    children.retain(|child| child.get("name").and_then(Value::as_str) != Some("browser-switch"));
-    children.push(managed);
+    children.retain(|child| {
+        let name = child.get("name").and_then(Value::as_str).unwrap_or("");
+        name != "browser-switch" && !category_names.iter().any(|category| category == name)
+    });
+    children.extend(category_folders);
 
     let serialized = serde_json::to_string_pretty(&value).map_err(|err| err.to_string())?;
     let temp_path = target.with_file_name("Bookmarks.browser-switch.tmp");
@@ -320,12 +346,16 @@ fn write_chrome_bookmarks(
     fs::remove_file(&target).map_err(|err| format!("替换 Chrome Bookmarks 失败: {err}"))?;
     fs::rename(&temp_path, &target).map_err(|err| format!("写入 Chrome Bookmarks 失败: {err}"))?;
 
+    if killed_chrome {
+        open_chrome();
+    }
+
     Ok(ChromeWriteResult {
         target_profile: profile_path,
         backup_path: path_to_string(&backup_path),
         written_count: bookmarks.len(),
         folder_count,
-        managed_folder: "browser-switch".to_string(),
+        managed_folder: "书签栏".to_string(),
     })
 }
 
@@ -352,6 +382,160 @@ fn restore_chrome_backup(
     let pre_restore = backup_chrome_writeback(&app, &target)?;
     fs::copy(&backup, &target).map_err(|err| format!("还原 Chrome 失败: {err}"))?;
     Ok(path_to_string(&pre_restore))
+}
+
+#[tauri::command]
+async fn organize_bookmarks_ai(
+    settings: AiSettings,
+    bookmarks: Vec<BookmarkRecord>,
+) -> Result<Vec<AiSuggestion>, String> {
+    if settings.api_key.trim().is_empty() {
+        return Err("请先填写 API Key".to_string());
+    }
+    if settings.base_url.trim().is_empty() {
+        return Err("请先填写接口地址".to_string());
+    }
+    if settings.model.trim().is_empty() {
+        return Err("请先填写模型名称".to_string());
+    }
+    if bookmarks.is_empty() {
+        return Err("没有可整理的书签".to_string());
+    }
+
+    let endpoint = chat_completions_endpoint(&settings.base_url);
+    let input_items: Vec<Value> = bookmarks
+        .iter()
+        .take(40)
+        .map(|bookmark| {
+            json!({
+                "id": bookmark.id,
+                "title": bookmark.title,
+                "url": bookmark.url,
+                "domain": domain_of(&bookmark.url),
+                "original_folder_path": bookmark.folder_path,
+                "source_browser": bookmark.source_browser
+            })
+        })
+        .collect();
+
+    let prompt = json!({
+        "categories": [
+            "开发技术", "AI 工具", "设计素材", "效率工具", "学习资料", "新闻资讯", "投资理财",
+            "购物电商", "社交社区", "影音娱乐", "游戏", "生活日常", "工作办公", "其他"
+        ],
+        "rules": {
+            "title": "中文标题尽量不超过15字，英文标题尽量不超过30字符，去掉站点噪音后缀",
+            "summary": "中文摘要不超过30字，用来说明这个页面是做什么的",
+            "tags": "返回2到5个具体标签，不要返回网站、工具、资源这类泛词",
+            "output": "只返回JSON，不要Markdown，不要解释"
+        },
+        "items": input_items
+    });
+
+    let body = json!({
+        "model": settings.model,
+        "temperature": 0.2,
+        "response_format": { "type": "json_object" },
+        "messages": [
+            {
+                "role": "system",
+                "content": "你是一个中文书签整理助手。你只生成整理建议，不删除、不移动真实书签。输出必须是 JSON，格式为 {\"items\":[{\"id\":\"...\",\"category\":\"...\",\"title\":\"...\",\"summary\":\"...\",\"tags\":[\"...\"],\"confidence\":0.8,\"reason\":\"...\"}]}。"
+            },
+            {
+                "role": "user",
+                "content": prompt.to_string()
+            }
+        ]
+    });
+
+    let client = Client::new();
+    let response = client
+        .post(endpoint)
+        .bearer_auth(settings.api_key.trim())
+        .json(&body)
+        .send()
+        .await
+        .map_err(|err| format!("AI 请求失败: {err}"))?;
+
+    let status = response.status();
+    let response_json: Value = response
+        .json()
+        .await
+        .map_err(|err| format!("AI 响应解析失败: {err}"))?;
+
+    if !status.is_success() {
+        return Err(format!("AI 请求失败: HTTP {status}, {response_json}"));
+    }
+
+    let content = response_json
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("AI 响应缺少 message.content: {response_json}"))?;
+
+    let parsed = parse_ai_content(content)?;
+    let items = parsed
+        .get("items")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "AI JSON 缺少 items 数组".to_string())?;
+
+    let mut suggestions = Vec::new();
+    for item in items {
+        let id = item
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "AI 返回项缺少 id".to_string())?
+            .to_string();
+        suggestions.push(AiSuggestion {
+            id,
+            category: item
+                .get("category")
+                .and_then(Value::as_str)
+                .unwrap_or("其他")
+                .trim()
+                .to_string(),
+            title: item
+                .get("title")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string(),
+            summary: item
+                .get("summary")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string(),
+            tags: item
+                .get("tags")
+                .and_then(Value::as_array)
+                .map(|tags| {
+                    tags.iter()
+                        .filter_map(Value::as_str)
+                        .map(|tag| tag.trim().to_string())
+                        .filter(|tag| !tag.is_empty())
+                        .take(5)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default(),
+            confidence: item
+                .get("confidence")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.5)
+                .clamp(0.0, 1.0),
+            reason: item
+                .get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string(),
+        });
+    }
+
+    Ok(suggestions)
 }
 
 fn collect_chrome_node(
@@ -477,7 +661,7 @@ fn firefox_folder_path(parent_id: i64, folders: &HashMap<i64, (i64, String)>) ->
     }
 }
 
-fn build_managed_chrome_folder(bookmarks: &[BookmarkRecord], next_id: &mut u64) -> Value {
+fn build_chrome_category_folders(bookmarks: &[BookmarkRecord], next_id: &mut u64) -> Vec<Value> {
     let mut grouped: BTreeMap<String, Vec<&BookmarkRecord>> = BTreeMap::new();
     for bookmark in bookmarks {
         let category = if bookmark.category.trim().is_empty() {
@@ -518,16 +702,54 @@ fn build_managed_chrome_folder(bookmarks: &[BookmarkRecord], next_id: &mut u64) 
         }));
     }
 
-    json!({
-        "children": category_folders,
-        "date_added": chrome_time_now(),
-        "date_last_used": "0",
-        "date_modified": chrome_time_now(),
-        "guid": Uuid::new_v4().to_string(),
-        "id": next_chrome_id(next_id),
-        "name": "browser-switch",
-        "type": "folder"
-    })
+    category_folders
+}
+
+fn generated_category_names(bookmarks: &[BookmarkRecord]) -> Vec<String> {
+    let mut names = bookmarks
+        .iter()
+        .map(|bookmark| {
+            if bookmark.category.trim().is_empty() {
+                "其他".to_string()
+            } else {
+                bookmark.category.trim().to_string()
+            }
+        })
+        .collect::<Vec<_>>();
+
+    names.extend(
+        [
+            "开发技术",
+            "AI 工具",
+            "设计素材",
+            "效率工具",
+            "学习资料",
+            "新闻资讯",
+            "投资理财",
+            "购物电商",
+            "社交社区",
+            "影音娱乐",
+            "游戏",
+            "生活日常",
+            "工作办公",
+            "其他",
+        ]
+        .iter()
+        .map(|value| value.to_string()),
+    );
+    names.sort();
+    names.dedup();
+    names
+}
+
+fn remove_legacy_browser_switch_folders(roots: &mut serde_json::Map<String, Value>) {
+    for root in roots.values_mut() {
+        if let Some(children) = root.get_mut("children").and_then(Value::as_array_mut) {
+            children.retain(|child| {
+                child.get("name").and_then(Value::as_str) != Some("browser-switch")
+            });
+        }
+    }
 }
 
 fn max_chrome_id(value: &Value) -> u64 {
@@ -649,6 +871,43 @@ fn default_tags(url: &str, category: &str) -> Vec<String> {
     }
 }
 
+fn chat_completions_endpoint(base_url: &str) -> String {
+    let trimmed = base_url.trim().trim_end_matches('/');
+    if trimmed.ends_with("/chat/completions") {
+        trimmed.to_string()
+    } else if trimmed.ends_with("/v1") {
+        format!("{trimmed}/chat/completions")
+    } else {
+        format!("{trimmed}/v1/chat/completions")
+    }
+}
+
+fn parse_ai_content(content: &str) -> Result<Value, String> {
+    if let Ok(value) = serde_json::from_str::<Value>(content) {
+        return Ok(value);
+    }
+
+    let start = content
+        .find('{')
+        .ok_or_else(|| "AI 响应不是 JSON".to_string())?;
+    let end = content
+        .rfind('}')
+        .ok_or_else(|| "AI 响应不是完整 JSON".to_string())?;
+    serde_json::from_str::<Value>(&content[start..=end])
+        .map_err(|err| format!("AI JSON 解析失败: {err}"))
+}
+
+fn domain_of(url: &str) -> String {
+    url.split("//")
+        .nth(1)
+        .unwrap_or(url)
+        .split('/')
+        .next()
+        .unwrap_or("")
+        .trim_start_matches("www.")
+        .to_string()
+}
+
 fn backup_file(
     app: &AppHandle,
     browser: &str,
@@ -713,6 +972,29 @@ fn chrome_running() -> bool {
     false
 }
 
+fn kill_chrome() -> Result<(), String> {
+    if cfg!(target_os = "windows") {
+        let status = Command::new("taskkill")
+            .args(["/IM", "chrome.exe", "/F"])
+            .status()
+            .map_err(|err| format!("关闭 Chrome 失败: {err}"))?;
+
+        if !status.success() && chrome_running() {
+            return Err("无法关闭 Chrome，请手动关闭后重试".to_string());
+        }
+    }
+
+    Ok(())
+}
+
+fn open_chrome() {
+    if cfg!(target_os = "windows") {
+        let _ = Command::new("cmd")
+            .args(["/C", "start", "", "chrome"])
+            .spawn();
+    }
+}
+
 fn chrome_time_now() -> String {
     let unix_micros = Utc::now().timestamp_micros();
     (unix_micros + 11_644_473_600_i64 * 1_000_000).to_string()
@@ -760,7 +1042,8 @@ pub fn run() {
             import_firefox_bookmarks,
             check_chrome_running,
             write_chrome_bookmarks,
-            restore_chrome_backup
+            restore_chrome_backup,
+            organize_bookmarks_ai
         ])
         .run(tauri::generate_context!())
         .expect("error while running browser-switch");

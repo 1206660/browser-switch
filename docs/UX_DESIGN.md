@@ -464,7 +464,7 @@ Summary:
 - 来源: `Google Chrome` or `Firefox`
 - 目标: `Google Chrome`
 - 配置: target profile path
-- 写入方式: `browser-switch 文件夹`
+- 写入方式: `直接写入书签栏`
 
 Preview metrics:
 
@@ -492,11 +492,11 @@ Secondary actions:
 
 Required warning:
 
-- `写入前会自动备份 Chrome 收藏夹。请先关闭 Chrome。`
+- `写入前会自动备份 Chrome 收藏夹。Chrome 正在运行时会自动关闭，写完后重新打开。`
 
 If Chrome appears to be running:
 
-- `请关闭 Chrome 后再写入`
+- `Chrome 正在运行，写入时会自动关闭并重启`
 - Button: `重新检测`
 
 Success state:

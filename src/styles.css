@@ -42,6 +42,10 @@ button:disabled {
   @apply border-primary/60 bg-primary/10 text-blue-200;
 }
 
+.input {
+  @apply h-9 w-full rounded-md border border-border bg-bg px-2 text-sm text-text outline-none placeholder:text-muted focus:shadow-focus;
+}
+
 .empty {
   @apply rounded-md border border-dashed border-border bg-bg px-3 py-6 text-center text-sm text-muted;
 }
@@ -49,4 +53,3 @@ button:disabled {
 .bookmark-row {
   @apply flex gap-3 border-b border-border px-4 py-3 hover:bg-bg/70;
 }
-

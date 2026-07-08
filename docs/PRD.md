@@ -8,7 +8,7 @@
 
 browser-switch starts as a personal browser bookmark organizer with Google Chrome as the first write target.
 
-The first version is not a cross-browser sync platform. It is a local-first desktop tool that imports Chrome or Firefox bookmarks, uses rules and AI to generate a cleanup plan, lets the user review the plan, and then writes accepted results into a managed Google Chrome bookmark folder.
+The first version is not a cross-browser sync platform. It is a local-first desktop tool that imports Chrome or Firefox bookmarks, uses rules and AI to generate a cleanup plan, lets the user review the plan, and then writes accepted results directly into the Google Chrome bookmark bar.
 
 The product goal for the first milestone is simple:
 
@@ -101,22 +101,22 @@ Required:
 
 - Let the user choose a target Chrome profile.
 - Create a backup of the target Chrome `Bookmarks` file before every write.
-- Require Chrome to be closed before write-back by default.
+- If Chrome is running, close it automatically after user confirmation and reopen it after write-back.
 - Generate a preview/diff before write-back.
-- Write accepted cleanup results into a managed top-level folder named `browser-switch`.
-- Replace only the managed `browser-switch` folder on repeated writes.
-- Preserve existing Chrome bookmarks outside the managed folder.
+- Write accepted cleanup results directly into Chrome bookmark bar.
+- Do not create an extra `browser-switch` parent folder.
+- Clean previous generated category folders before repeated writes.
+- Remove the legacy `browser-switch` folder if it exists.
 - Support restoring Chrome bookmarks from a backup.
 
 Default write structure:
 
-- `browser-switch/AI 分类/<category>`
-- `browser-switch/待确认`
-- `browser-switch/失效链接`
+- `书签栏/<category>`
 
 Out of scope:
 
-- Merging directly into Chrome's existing root folders.
+- Writing to `其他书签`.
+- Keeping an extra `browser-switch` wrapper folder.
 - Writing rejected items by default.
 - Writing directly into Firefox.
 
@@ -203,7 +203,7 @@ Required flow:
 V0.1 apply target:
 
 - Apply to browser-switch local library.
-- Write accepted results to a managed Google Chrome folder.
+- Write accepted results directly to Chrome bookmark bar.
 - Export cleaned HTML as a fallback and portable backup.
 
 Deferred apply target:
@@ -263,7 +263,7 @@ These are intentionally not part of V0.1:
 - Browser extension.
 - Realtime bookmark sync.
 - Direct write-back into Firefox.
-- Direct merge into existing Chrome root folders.
+- Writing to Chrome `其他书签`.
 - Direct Firefox write-back.
 - Semantic vector search.
 - Sharing folders.
@@ -382,7 +382,8 @@ V0.1 is acceptable when:
 - Accepted changes are stored locally.
 - Accepted Chrome cleanup results can be written into Chrome.
 - Accepted Firefox cleanup results can be written into Chrome.
-- Existing Chrome bookmarks outside the managed `browser-switch` folder remain untouched.
+- No extra `browser-switch` parent folder is created.
+- Previous generated category folders are cleaned before write.
 - The Firefox profile remains untouched.
 - The user can export a cleaned bookmark HTML file as a fallback.
 
@@ -416,7 +417,7 @@ V0.1 is acceptable when:
 ### Milestone 4: Chrome Write-Back And Export
 
 - Apply accepted changes to local library.
-- Write accepted results into Chrome's managed `browser-switch` folder.
+- Write accepted results directly into Chrome bookmark bar.
 - Restore Chrome from backup if needed.
 - Export cleaned HTML as fallback.
 - Add import/export history.

@@ -61,74 +61,68 @@ Before writing to Chrome, browser-switch must:
 4. Generate a dry-run diff.
 5. Ask the user to confirm.
 6. Check whether Chrome appears to be running.
-7. Prefer writing only when Chrome is closed.
+7. If Chrome is running, close it automatically after confirmation.
 8. Write atomically:
    - write new file to temp path
    - validate JSON
    - replace `Bookmarks`
+9. Reopen Chrome after write-back.
 
 If Chrome is running:
 
-- Show `请关闭 Chrome 后再写入`
-- Allow `重新检测`
-- Do not write by default.
+- Show `Chrome 正在运行，写入时会自动关闭并重启`
+- Kill `chrome.exe` only after the user confirms write-back.
+- Reopen Chrome after write-back succeeds.
 
 ## 4. Write Modes
 
-### Replace Managed Folder
+### Write Directly To Bookmark Bar
 
 Recommended V0.1 mode.
 
-browser-switch writes cleaned bookmarks under one top-level Chrome folder:
+browser-switch writes cleaned category folders directly under Chrome bookmark bar:
 
 ```text
-browser-switch
-```
-
-Inside it:
-
-```text
-browser-switch/
-  AI 分类/
-  原始目录/
-  待确认/
+书签栏/
+  开发技术/
+  AI 工具/
+  设计素材/
+  ...
 ```
 
 Behavior:
 
-- Existing Chrome bookmarks outside the `browser-switch` folder remain untouched.
-- On next write, browser-switch replaces only its managed folder.
-- This avoids destroying the user's existing Chrome structure.
+- No extra `browser-switch` parent folder is created.
+- On each write, browser-switch removes previous generated category folders from the bookmark bar.
+- The old `browser-switch` folder from earlier builds is also removed.
+- Chrome bookmarks with unrelated names are preserved.
 
-### Merge Into Chrome Root
+### Write To Other Bookmarks
 
-Deferred.
+Out of scope.
 
-This mode can place cleaned folders directly into Chrome's bookmark bar or other bookmarks. It is riskier and should wait until managed-folder write-back is reliable.
+The user explicitly wants all cleaned bookmarks in the Chrome bookmark bar.
 
 ## 5. Target Structure
 
 Default write structure:
 
 ```text
-browser-switch/
-  AI 分类/
-    开发技术/
-    AI 工具/
-    设计素材/
-    效率工具/
-    学习资料/
-    ...
-  待确认/
-  失效链接/
+书签栏/
+  开发技术/
+  AI 工具/
+  设计素材/
+  效率工具/
+  学习资料/
+  ...
 ```
 
 Rules:
 
-- Accepted items go into `AI 分类/<category>`.
-- Rejected items are not written by default.
-- Unreviewed items go into `待确认` only if the user enables `包含未审核`.
-- Dead links go into `失效链接` only if the user enables `包含失效链接`.
+- Accepted items go into `书签栏/<category>`.
+- Rejected items are not written.
+- Unreviewed items are not written by default.
+- Dead links are not written by default.
 - Duplicate items write only the kept item by default.
 
 ## 6. Chrome Bookmark JSON Notes
@@ -154,8 +148,9 @@ Important fields:
 Write strategy:
 
 - Preserve existing root objects and metadata.
-- Find or create the top-level managed folder under `other` by default.
-- Replace only that managed folder's children.
+- Use `roots.bookmark_bar` as the write target.
+- Remove previous generated category folders from bookmark bar before writing.
+- Remove legacy `browser-switch` folder if present.
 - Generate new IDs/guids if needed.
 - Preserve original URLs.
 - Use accepted title as Chrome bookmark `name`.
@@ -166,7 +161,7 @@ Before write-back, show:
 
 - Target browser: `Google Chrome`
 - Target profile path.
-- Write mode: `写入 browser-switch 文件夹`
+- Write mode: `直接写入书签栏`
 - Total bookmarks to write.
 - Folders to create.
 - Duplicates skipped.
@@ -181,7 +176,7 @@ Buttons:
 
 Warning:
 
-`写入前会自动备份 Chrome 收藏夹。请先关闭 Chrome。`
+`写入前会自动备份 Chrome 收藏夹。Chrome 正在运行时会自动关闭，写完后重新打开。`
 
 ## 8. Restore From Chrome Backup
 
@@ -209,10 +204,10 @@ Chrome write-back is acceptable when:
 
 - The app can read Chrome bookmarks from a copied `Bookmarks` file.
 - The app can generate an AI cleanup plan from Chrome bookmarks.
-- The app can write accepted Chrome cleanup results into a managed Chrome folder.
-- The app can read Firefox bookmarks and write accepted results into the managed Chrome folder.
+- The app can write accepted Chrome cleanup results into Chrome bookmark bar.
+- The app can read Firefox bookmarks and write accepted results into Chrome bookmark bar.
 - The app creates a Chrome `Bookmarks` backup before every write.
 - The app can restore Chrome `Bookmarks` from a backup.
-- Existing Chrome bookmarks outside the managed folder remain untouched.
+- No extra `browser-switch` parent folder is created.
+- Previous generated category folders are cleaned before write.
 - Firefox is never modified in V0.1.
-

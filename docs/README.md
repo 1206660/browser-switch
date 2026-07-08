@@ -45,7 +45,9 @@ Do:
 - Generate rule and AI cleanup proposals.
 - Let the user review proposals.
 - Back up Chrome before every write.
-- Write accepted results into a managed Chrome `browser-switch` folder.
+- Write accepted results directly into the Chrome bookmark bar.
+- Do not create an extra `browser-switch` parent folder.
+- Close and reopen Chrome automatically during write-back when needed.
 - Restore Chrome bookmarks from backup when needed.
 - Export cleaned HTML as a fallback.
 

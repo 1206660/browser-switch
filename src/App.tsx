@@ -10,6 +10,7 @@ import {
   FileJson,
   FolderTree,
   Gauge,
+  KeyRound,
   Loader2,
   Search,
   Settings,
@@ -70,6 +71,28 @@ type Notice = {
   text: string;
 };
 
+type AiSettings = {
+  base_url: string;
+  model: string;
+  api_key: string;
+};
+
+type AiSuggestion = {
+  id: string;
+  category: string;
+  title: string;
+  summary: string;
+  tags: string[];
+  confidence: number;
+  reason: string;
+};
+
+const defaultAiSettings: AiSettings = {
+  base_url: "https://api.deepseek.com",
+  model: "deepseek-chat",
+  api_key: ""
+};
+
 const navItems = [
   ["总览", Gauge],
   ["全部", FolderTree],
@@ -93,16 +116,22 @@ function App() {
   const [notice, setNotice] = useState<Notice | null>(null);
   const [chromeRunning, setChromeRunning] = useState(false);
   const [lastWrite, setLastWrite] = useState<ChromeWriteResult | null>(null);
+  const [aiSettings, setAiSettings] = useState<AiSettings>(() => loadAiSettings());
 
   useEffect(() => {
     void refreshProfiles();
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem("browser-switch.ai-settings", JSON.stringify(aiSettings));
+  }, [aiSettings]);
 
   const sourceProfiles = source === "chrome" ? chromeProfiles : firefoxProfiles;
   const selectedCount = bookmarks.filter((item) => item.selected).length;
   const duplicateCount = bookmarks.filter((item) => item.status === "重复").length;
   const categoryCount = new Set(bookmarks.map((item) => item.category)).size;
   const targetProfile = chromeProfiles.find((profile) => profile.path === targetProfilePath) ?? chromeProfiles[0];
+  const writeCount = bookmarks.filter((item) => item.selected && item.status !== "重复").length;
 
   const filteredBookmarks = useMemo(() => {
     const keyword = query.trim().toLowerCase();
@@ -206,12 +235,77 @@ function App() {
     });
   }
 
+  async function runAiCleanup() {
+    if (bookmarks.length === 0) {
+      setNotice({ type: "warn", text: "请先导入书签" });
+      return;
+    }
+
+    const targets = bookmarks.filter((item) => item.selected && item.status !== "重复").slice(0, 40);
+    if (targets.length === 0) {
+      setNotice({ type: "warn", text: "没有可整理的选中书签" });
+      return;
+    }
+
+    if (!aiSettings.api_key.trim()) {
+      setNotice({ type: "warn", text: "未填写 API Key，已改用本地规则整理" });
+      runCleanup("ai");
+      return;
+    }
+
+    setLoading(true);
+    setNotice({ type: "ok", text: `正在请求 AI 整理 ${targets.length} 条书签...` });
+    try {
+      const suggestions = await invoke<AiSuggestion[]>("organize_bookmarks_ai", {
+        settings: aiSettings,
+        bookmarks: targets
+      });
+      const suggestionMap = new Map(suggestions.map((item) => [item.id, item]));
+      const seen = new Map<string, string>();
+
+      setBookmarks((current) =>
+        current.map((item) => {
+          const normalized = normalizeUrl(item.url);
+          const duplicate = seen.has(normalized);
+          if (!duplicate) {
+            seen.set(normalized, item.id);
+          }
+
+          const suggestion = suggestionMap.get(item.id);
+          if (!suggestion) {
+            return {
+              ...item,
+              status: duplicate ? "重复" : item.status,
+              selected: !duplicate && item.selected
+            };
+          }
+
+          return {
+            ...item,
+            title: suggestion.title || item.title,
+            category: suggestion.category || item.category,
+            tags: suggestion.tags.length > 0 ? suggestion.tags : item.tags,
+            summary: suggestion.summary || item.summary,
+            status: duplicate ? "重复" : "正常",
+            selected: !duplicate
+          };
+        })
+      );
+      setActiveNav("待审核");
+      setNotice({ type: "ok", text: `AI 整理完成：${suggestions.length} 条，确认后可写入 Chrome` });
+    } catch (error) {
+      setNotice({ type: "error", text: String(error) });
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function refreshChromeState() {
     const running = await invoke<boolean>("check_chrome_running");
     setChromeRunning(running);
     setNotice({
       type: running ? "warn" : "ok",
-      text: running ? "检测到 Chrome 正在运行，请关闭后再写入" : "Chrome 未运行，可以写入"
+      text: running ? "检测到 Chrome 正在运行，写入时会自动关闭并重启" : "Chrome 未运行，可以写入"
     });
   }
 
@@ -223,11 +317,6 @@ function App() {
 
     const running = await invoke<boolean>("check_chrome_running");
     setChromeRunning(running);
-    if (running) {
-      setNotice({ type: "warn", text: "请关闭 Chrome 后再写入" });
-      return;
-    }
-
     const accepted = bookmarks.filter((item) => item.selected && item.status !== "重复");
     if (accepted.length === 0) {
       setNotice({ type: "warn", text: "没有可写入的已确认书签" });
@@ -235,7 +324,7 @@ function App() {
     }
 
     const confirmed = window.confirm(
-      `将写入 ${accepted.length} 条书签到 Chrome 的 browser-switch 文件夹。\n写入前会自动备份 Chrome 收藏夹。确认继续？`
+      `将写入 ${accepted.length} 条书签到 Chrome 书签栏。\n会清理上一次生成的分类文件夹。\n如果 Chrome 正在运行，会先强制关闭，写完后重新打开。\n写入前会自动备份 Chrome 收藏夹。确认继续？`
     );
     if (!confirmed) {
       return;
@@ -248,7 +337,7 @@ function App() {
         bookmarks: accepted
       });
       setLastWrite(result);
-      setNotice({ type: "ok", text: `已写入 Chrome：${result.written_count} 条，备份已创建` });
+      setNotice({ type: "ok", text: `已写入 Chrome 书签栏：${result.written_count} 条，备份已创建` });
     } catch (error) {
       setNotice({ type: "error", text: String(error) });
     } finally {
@@ -322,7 +411,7 @@ function App() {
               {loading ? <Loader2 className="animate-spin" size={16} /> : <DatabaseBackup size={16} />}
               重新扫描
             </button>
-            <button className="btn-primary" onClick={() => runCleanup("ai")} disabled={bookmarks.length === 0}>
+            <button className="btn-primary" onClick={() => void runAiCleanup()} disabled={bookmarks.length === 0 || loading}>
               <Bot size={16} />
               AI 整理
             </button>
@@ -386,12 +475,40 @@ function App() {
                   <button className="btn-secondary" onClick={() => runCleanup("quick")} disabled={bookmarks.length === 0}>
                     快速整理
                   </button>
-                  <button className="btn-primary" onClick={() => runCleanup("ai")} disabled={bookmarks.length === 0}>
+                  <button className="btn-primary" onClick={() => void runAiCleanup()} disabled={bookmarks.length === 0 || loading}>
                     AI 整理
                   </button>
                 </div>
                 <div className="mt-3 text-xs leading-5 text-muted">
-                  当前版本先用本地规则模拟 AI 整理链路：分类、清理标题、标记重复项。模型 API 会在下一步接入。
+                  未配置 API Key 时会使用本地规则。真实 AI 默认每次处理前 40 条选中书签，避免一次请求过大。
+                </div>
+              </Panel>
+
+              <Panel title="AI 设置" icon={<KeyRound size={16} />}>
+                <label className="mb-1 block text-xs text-muted">接口地址</label>
+                <input
+                  className="input mb-2"
+                  onChange={(event) => setAiSettings((current) => ({ ...current, base_url: event.target.value }))}
+                  placeholder="https://api.deepseek.com"
+                  value={aiSettings.base_url}
+                />
+                <label className="mb-1 block text-xs text-muted">模型</label>
+                <input
+                  className="input mb-2"
+                  onChange={(event) => setAiSettings((current) => ({ ...current, model: event.target.value }))}
+                  placeholder="deepseek-chat"
+                  value={aiSettings.model}
+                />
+                <label className="mb-1 block text-xs text-muted">API Key</label>
+                <input
+                  className="input"
+                  onChange={(event) => setAiSettings((current) => ({ ...current, api_key: event.target.value }))}
+                  placeholder="sk-..."
+                  type="password"
+                  value={aiSettings.api_key}
+                />
+                <div className="mt-2 text-xs leading-5 text-muted">
+                  支持 OpenAI-compatible 接口。DeepSeek 可直接使用默认接口和模型。
                 </div>
               </Panel>
 
@@ -409,7 +526,7 @@ function App() {
                   ))}
                 </select>
                 <div className="mb-3 grid grid-cols-2 gap-2 text-xs">
-                  <Stat label="将写入" value={selectedCount - duplicateCount} />
+                  <Stat label="将写入" value={writeCount} />
                   <Stat label="分类" value={categoryCount} />
                 </div>
                 <div className="grid grid-cols-2 gap-2">
@@ -422,7 +539,7 @@ function App() {
                   </button>
                 </div>
                 <div className="mt-3 text-xs text-muted">
-                  {chromeRunning ? "Chrome 正在运行，需关闭后写入。" : "默认只替换 Chrome 中的 browser-switch 文件夹。"}
+                  {chromeRunning ? "Chrome 正在运行，写入时会自动关闭并重启。" : "将直接写入 Chrome 书签栏，不增加外层目录。"}
                 </div>
                 {lastWrite && (
                   <div className="mt-3 rounded-md border border-border bg-bg p-2 text-xs text-muted">
@@ -592,5 +709,16 @@ function domainOf(url: string) {
   }
 }
 
-export default App;
+function loadAiSettings(): AiSettings {
+  try {
+    const raw = localStorage.getItem("browser-switch.ai-settings");
+    if (!raw) {
+      return defaultAiSettings;
+    }
+    return { ...defaultAiSettings, ...JSON.parse(raw) };
+  } catch {
+    return defaultAiSettings;
+  }
+}
 
+export default App;

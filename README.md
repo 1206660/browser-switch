@@ -6,7 +6,7 @@
 
 1. 读取 Google Chrome 收藏信息。
 2. 整理并确认。
-3. 写入 Google Chrome 的 `browser-switch` 托管文件夹。
+3. 写入 Google Chrome 书签栏。
 4. 读取 Firefox 收藏信息。
 5. 整理并确认。
 6. 写入 Google Chrome。
@@ -52,7 +52,8 @@ pnpm tauri:build
 - Chrome `Bookmarks` JSON 导入。
 - Firefox `places.sqlite` 导入。
 - 本地规则整理和重复项标记。
-- 写入 Chrome 前检测 Chrome 进程。
+- 写入 Chrome 前检测 Chrome 进程；如果 Chrome 正在运行，会自动关闭。
 - 写入 Chrome 前自动备份 `Bookmarks`。
-- 仅替换 Chrome 中的 `browser-switch` 托管文件夹。
-
+- 写入后自动重新打开 Chrome。
+- 不增加 `browser-switch` 外层目录，直接在书签栏写入 AI 分类文件夹。
+- 写入前会清理上一次生成的分类文件夹和旧 `browser-switch` 目录。

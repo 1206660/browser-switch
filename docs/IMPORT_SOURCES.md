@@ -148,9 +148,9 @@ Recommended development order:
 2. Bookmark list rendering.
 3. Quick cleanup on Chrome data.
 4. AI cleanup on selected Chrome bookmarks.
-5. Write accepted Chrome cleanup result to Chrome managed folder.
+5. Write accepted Chrome cleanup result to Chrome bookmark bar.
 6. Firefox `places.sqlite` import.
-7. Write accepted Firefox cleanup result to Chrome managed folder.
+7. Write accepted Firefox cleanup result to Chrome bookmark bar.
 
 This lets the product become testable sooner while keeping the final Firefox cleanup goal intact.
 
